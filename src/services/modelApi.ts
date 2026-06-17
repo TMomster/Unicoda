@@ -109,8 +109,10 @@ export async function* streamChatCompletion(
     } catch {
       /* skip */
     }
+    // 脱敏：截断过长错误响应（可能包含 API Key 痕迹）
+    const safe = errorText.length > 500 ? errorText.slice(0, 500) + "..." : errorText;
     throw new Error(
-      `API error ${response.status}: ${errorText || response.statusText}`,
+      `API error ${response.status}: ${safe || response.statusText}`,
     );
   }
 

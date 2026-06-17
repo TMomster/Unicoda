@@ -83,17 +83,13 @@ export function LockProvider({ children }: { children: ReactNode }) {
 
   /** Just set isLocked via functional updater — never stale */
   const performLock = useCallback(() => {
-    console.log("[LockContext/performLock] called");
     setConfig((prev) => {
       if (!prev.privacyEnabled || prev.passwordHash.length === 0) {
-        console.log("[LockContext/performLock] bail: privacy or password", { privacyEnabled: prev.privacyEnabled, passwordHashLen: prev.passwordHash.length });
         return prev;
       }
       if (prev.isLocked) {
-        console.log("[LockContext/performLock] bail: already locked");
         return prev;
       }
-      console.log("[LockContext/performLock] locking");
       const next = { ...prev, isLocked: true };
       saveLockConfig(next);
       return next;
@@ -102,9 +98,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
 
   // 启动时异步加载锁定配置
   useEffect(() => {
-    console.log("[LockContext] loading config...");
     loadLockConfig().then((loadedConfig) => {
-      console.log("[LockContext] config loaded, passwordHash?", loadedConfig.passwordHash.slice(0,8)+"...", "privacyEnabled:", loadedConfig.privacyEnabled, "isLocked:", loadedConfig.isLocked, "idleTimeout:", loadedConfig.idleTimeout);
       setConfig(loadedConfig);
       setLoaded(true);
     });
@@ -163,9 +157,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
       if (c.isLocked) return;
       let delayMs = c.idleTimeout * 60 * 1000;
       if (!Number.isFinite(delayMs) || delayMs <= 0) delayMs = 5 * 60 * 1000; // fallback
-      console.log("[LockContext/idle] setting idle timer for", delayMs/1000, "seconds");
       idleTimerRef.current = setTimeout(() => {
-        console.log("[LockContext/idle] idle timer fired!");
         performLock();
       }, delayMs);
     };
@@ -200,11 +192,9 @@ export function LockProvider({ children }: { children: ReactNode }) {
     async (password: string): Promise<boolean> => {
       const hash = await sha256(password);
       const expected = configRef.current.passwordHash;
-      console.log("[LockContext/unlock] hash match?", { inputHash: hash.slice(0,8)+"...", expectedHash: expected.slice(0,8)+"...", match: hash === expected });
       if (hash !== expected) return false;
       resetIdleTimer();
       setConfig((prev) => {
-        console.log("[LockContext/unlock] setConfig callback prev.isLocked =", prev.isLocked);
         if (!prev.isLocked) return prev;
         const next = { ...prev, isLocked: false };
         saveLockConfig(next);
@@ -219,7 +209,6 @@ export function LockProvider({ children }: { children: ReactNode }) {
     async (password: string): Promise<boolean> => {
       if (config.passwordHash.length > 0) return false;
       const hash = await sha256(password);
-      console.log("[LockContext/setPassword] computed hash:", hash.slice(0,12)+"...");
       const next: LockConfig = { ...config, passwordHash: hash, isLocked: false };
       setConfig(next);
       saveLockConfig(next);

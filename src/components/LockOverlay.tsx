@@ -52,20 +52,17 @@ export default function LockOverlay({ locale }: Props) {
   /** 非 memoized 的普通 async 函数，通过 ref 读最新 password，杜绝闭包过期 */
   const handleUnlock = async () => {
     const pwd = pwRef.current;
-    console.log("[LockOverlay/handleUnlock] trying unlock with pwd length =", pwd?.length, "isLocked =", isLocked);
     if (!pwd) return;
     setUnlocking(true);
     setError(false);
     try {
       const ok = await unlock(pwd);
-      console.log("[LockOverlay/handleUnlock] unlock result ok =", ok, "isLocked still =", isLocked);
       if (!ok) {
         setError(true);
         setPassword("");
         setTimeout(() => setError(false), 600);
       }
-    } catch (err) {
-      console.error("[LockOverlay/handleUnlock] unlock threw:", err);
+    } catch {
       setError(true);
       setPassword("");
       setTimeout(() => setError(false), 600);

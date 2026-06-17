@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
 import type { ModelConfig } from "../types";
-import { readConfigFile, writeConfigFile } from "../utils/configStorage";
+import { readConfigFile, writeConfigFile, saveApiKey, loadApiKey, deleteApiKey } from "../utils/configStorage";
 
 const STORAGE_KEY = "unison-models";
 
@@ -58,12 +58,6 @@ function loadModels(): ModelConfig[] {
   return DEFAULT_PRESETS;
 }
 
-function saveModelsSync(models: ModelConfig[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(models));
-  } catch {}
-}
-
 interface ModelContextType {
   models: ModelConfig[];
   selectedModelId: string;
@@ -82,10 +76,17 @@ export function ModelProvider({ children }: { children: ReactNode }) {
 
   // 从配置文件异步加载（覆盖 localStorage 缓存）
   useEffect(() => {
-    readConfigFile<ModelConfig[]>(STORAGE_KEY, DEFAULT_PRESETS).then((fileModels) => {
-      setModels(fileModels.map(normalizeModel));
+    readConfigFile<ModelConfig[]>(STORAGE_KEY, DEFAULT_PRESETS).then(async (fileModels) => {
+      // 从 Credential Manager 恢复每个模型的 API Key
+      const restored = await Promise.all(
+        fileModels.map(async (m) => {
+          const apiKey = await loadApiKey(m.id);
+          return { ...m, apiKey: apiKey || m.apiKey };
+        }),
+      );
+      setModels(restored.map(normalizeModel));
       // 恢复 nextModelId
-      for (const m of fileModels) {
+      for (const m of restored) {
         const num = parseInt(m.id.replace(/^model-/, ""), 10);
         if (!isNaN(num) && num >= nextModelId) nextModelId = num + 1;
       }
@@ -99,9 +100,17 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     }
   }, [models, selectedModelId]);
 
-  const persist = useCallback((next: ModelConfig[]) => {
-    saveModelsSync(next);
-    writeConfigFile(STORAGE_KEY, next);
+  const persist = useCallback(async (next: ModelConfig[]) => {
+    // 保存模型配置到加密文件（不含 API Key）
+    const safe = next.map(({ apiKey: _, ...rest }) => ({ ...rest, apiKey: "" }));
+    writeConfigFile(STORAGE_KEY, safe);
+
+    // 将 API Key 分别存入 Credential Manager
+    for (const m of next) {
+      if (m.apiKey) {
+        await saveApiKey(m.id, m.apiKey);
+      }
+    }
   }, []);
 
   const addModel = useCallback(() => {
@@ -136,6 +145,8 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       persist(next);
       return next;
     });
+    // 清理 Credential Manager 中的 API Key
+    deleteApiKey(id);
     setSelectedModelId((curr) => (curr === id ? "" : curr));
   }, [persist]);
 
