@@ -1,0 +1,55 @@
+Unison — Your request, our code.
+Copyright (c) 2026 Momster
+
+========================================================================
+                              COPYING
+========================================================================
+
+This file summarizes the licensing for the Unison project.
+
+---
+
+1. PROJECT CODE
+   ------------
+
+   Copyright (c) 2026 Momster
+
+   Licensed under the **Apache License, Version 2.0** (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied. See the License for the specific language governing
+   permissions and limitations under the License.
+
+   See the `LICENSE` file in the root of this repository for the full
+   Apache 2.0 license text.
+
+2. BUNDLED FONTS
+   --------------
+
+   The font files in `fonts/` are redistributed under the
+   **SIL Open Font License 1.1 (OFL-1.1)**.
+
+   | Font          | Copyright                             |
+   |---------------|---------------------------------------|
+   | Noto Sans SC  | Google LLC                            |
+   | Smiley Sans   | atelier-anchor / jiongic / 和音 / …   |
+   | Maple Mono    | subframe7536                          |
+
+   See `fonts/LICENSE.md` for the full attribution.
+
+3. THIRD-PARTY DEPENDENCIES
+   -------------------------
+
+   This project depends on third-party libraries (npm packages,
+   Rust crates, etc.) under their own respective licenses.
+   Refer to each package's LICENSE file for details.
+
+---
+
+Unison — Your request, our code.
