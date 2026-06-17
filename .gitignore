@@ -37,3 +37,6 @@ runpack/
 # Logs
 logs/
 $null
+
+#doc
+doc/
