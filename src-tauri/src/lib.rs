@@ -1,3 +1,4 @@
+use base64::Engine;
 use tauri::Manager;
 
 fn get_config_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -12,53 +13,59 @@ fn get_config_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, S
 
 #[cfg(target_os = "windows")]
 mod dpapi {
-    use windows::Win32::Data::Dpapi::{CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN};
-    use windows::Win32::Foundation::{LocalFree, BOOL};
-    use windows::Win32::System::Memory::LocalFree as LocalFreeMem;
+    use winapi::um::dpapi::{CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN};
+    use winapi::um::wincrypt::DATA_BLOB;
+    use winapi::um::winbase::LocalFree;
 
     pub fn encrypt(data: &[u8]) -> Result<Vec<u8>, String> {
-        let data_in = windows::Win32::Data::Dpapi::CRYPT_INTEGER_BLOB {
-            cbData: data.len() as u32,
-            pbData: data.as_ptr() as *mut u8,
-        };
-        let mut data_out = windows::Win32::Data::Dpapi::CRYPT_INTEGER_BLOB::default();
         unsafe {
-            CryptProtectData(
-                &data_in,
-                None,
-                None,
-                None,
-                None,
+            let mut data_in = DATA_BLOB {
+                cbData: data.len() as u32,
+                pbData: data.as_ptr() as *mut u8,
+            };
+            let mut data_out: DATA_BLOB = std::mem::zeroed();
+            let ret = CryptProtectData(
+                &mut data_in as *mut DATA_BLOB,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
                 CRYPTPROTECT_UI_FORBIDDEN,
-                &mut data_out,
-            )
-            .map_err(|e| format!("DPAPI encrypt failed: {}", e))?;
-
-            let result = std::slice::from_raw_parts(data_out.pbData, data_out.cbData as usize).to_vec();
+                &mut data_out as *mut DATA_BLOB,
+            );
+            if ret == 0 {
+                return Err("DPAPI encrypt failed".to_string());
+            }
+            let result =
+                std::slice::from_raw_parts(data_out.pbData as *const u8, data_out.cbData as usize)
+                    .to_vec();
             LocalFree(data_out.pbData as *mut _);
             Ok(result)
         }
     }
 
     pub fn decrypt(data: &[u8]) -> Result<Vec<u8>, String> {
-        let data_in = windows::Win32::Data::Dpapi::CRYPT_INTEGER_BLOB {
-            cbData: data.len() as u32,
-            pbData: data.as_ptr() as *mut u8,
-        };
-        let mut data_out = windows::Win32::Data::Dpapi::CRYPT_INTEGER_BLOB::default();
         unsafe {
-            CryptUnprotectData(
-                &data_in,
-                None,
-                None,
-                None,
-                None,
+            let mut data_in = DATA_BLOB {
+                cbData: data.len() as u32,
+                pbData: data.as_ptr() as *mut u8,
+            };
+            let mut data_out: DATA_BLOB = std::mem::zeroed();
+            let ret = CryptUnprotectData(
+                &mut data_in as *mut DATA_BLOB,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
                 CRYPTPROTECT_UI_FORBIDDEN,
-                &mut data_out,
-            )
-            .map_err(|e| format!("DPAPI decrypt failed: {}", e))?;
-
-            let result = std::slice::from_raw_parts(data_out.pbData, data_out.cbData as usize).to_vec();
+                &mut data_out as *mut DATA_BLOB,
+            );
+            if ret == 0 {
+                return Err("DPAPI decrypt failed".to_string());
+            }
+            let result =
+                std::slice::from_raw_parts(data_out.pbData as *const u8, data_out.cbData as usize)
+                    .to_vec();
             LocalFree(data_out.pbData as *mut _);
             Ok(result)
         }
@@ -68,7 +75,7 @@ mod dpapi {
 #[cfg(not(target_os = "windows"))]
 mod dpapi {
     pub fn encrypt(data: &[u8]) -> Result<Vec<u8>, String> {
-        Ok(data.to_vec()) // fallback: no encryption on non-Windows
+        Ok(data.to_vec())
     }
     pub fn decrypt(data: &[u8]) -> Result<Vec<u8>, String> {
         Ok(data.to_vec())
@@ -79,65 +86,75 @@ mod dpapi {
 
 #[cfg(target_os = "windows")]
 mod credential_manager {
-    use windows::Win32::Security::Credentials::*;
-    use windows::Win32::Foundation::{PWSTR, WIN32_ERROR};
+    use winapi::um::wincred::*;
+    use winapi::shared::ntdef::LPCWSTR;
 
-    /// 保存凭据到 Windows Credential Manager
     pub fn save(target: &str, secret: &str) -> Result<(), String> {
         unsafe {
-            let target_wide: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut target_wide: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
             let secret_bytes = secret.as_bytes();
             let blob_size = secret_bytes.len() as u32;
 
-            let mut cred = CREDENTIALW::default();
+            let mut cred: CREDENTIALW = std::mem::zeroed();
             cred.Type = CRED_TYPE_GENERIC;
-            cred.TargetName = PWSTR(target_wide.as_ptr() as *mut _);
+            cred.TargetName = target_wide.as_mut_ptr();
             cred.CredentialBlobSize = blob_size;
             cred.CredentialBlob = secret_bytes.as_ptr() as *mut u8;
             cred.Persist = CRED_PERSIST_LOCAL_MACHINE;
 
-            CredWriteW(&cred, 0)
-                .map_err(|e| format!("CredWriteW failed: {}", e))?;
+            let ret = CredWriteW(&mut cred as *mut CREDENTIALW, 0);
+            if ret == 0 {
+                return Err("CredWriteW failed".to_string());
+            }
             Ok(())
         }
     }
 
-    /// 从 Windows Credential Manager 读取凭据
     pub fn load(target: &str) -> Result<Option<String>, String> {
         unsafe {
             let target_wide: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
             let mut p_cred: *mut CREDENTIALW = std::ptr::null_mut();
 
-            match CredReadW(PWSTR(target_wide.as_ptr() as *mut _), CRED_TYPE_GENERIC, 0, &mut p_cred) {
-                Ok(()) => {
-                    let cred = &*p_cred;
-                    let blob = std::slice::from_raw_parts(
-                        cred.CredentialBlob as *const u8,
-                        cred.CredentialBlobSize as usize,
-                    );
-                    let secret = String::from_utf8(blob.to_vec())
-                        .map_err(|e| format!("UTF-8 decode failed: {}", e))?;
-                    CredFree(p_cred as *mut _);
-                    Ok(Some(secret))
+            let ret = CredReadW(
+                target_wide.as_ptr() as LPCWSTR,
+                CRED_TYPE_GENERIC,
+                0,
+                &mut p_cred as *mut *mut CREDENTIALW,
+            );
+            if ret == 0 {
+                let err = winapi::um::errhandlingapi::GetLastError();
+                if err == 1168 /* ERROR_NOT_FOUND */ {
+                    return Ok(None);
                 }
-                Err(e) => {
-                    if WIN32_ERROR(e.code.0) == WIN32_ERROR(0x80070490) // ERROR_NOT_FOUND
-                    {
-                        Ok(None)
-                    } else {
-                        Err(format!("CredReadW failed: {}", e))
-                    }
-                }
+                return Err(format!("CredReadW failed (error {})", err));
             }
+
+            let cred = &*p_cred;
+            let blob = std::slice::from_raw_parts(
+                cred.CredentialBlob as *const u8,
+                cred.CredentialBlobSize as usize,
+            );
+            let secret = String::from_utf8(blob.to_vec())
+                .map_err(|e| format!("UTF-8 decode failed: {}", e))?;
+            CredFree(p_cred as *mut _);
+            Ok(Some(secret))
         }
     }
 
-    /// 从 Windows Credential Manager 删除凭据
     pub fn delete(target: &str) -> Result<(), String> {
         unsafe {
             let target_wide: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
-            CredDeleteW(PWSTR(target_wide.as_ptr() as *mut _), CRED_TYPE_GENERIC, 0)
-                .map_err(|e| format!("CredDeleteW failed: {}", e))?;
+            let ret = CredDeleteW(
+                target_wide.as_ptr() as LPCWSTR,
+                CRED_TYPE_GENERIC,
+                0,
+            );
+            if ret == 0 {
+                let err = winapi::um::errhandlingapi::GetLastError();
+                if err != 1168 /* ERROR_NOT_FOUND */ {
+                    return Err(format!("CredDeleteW failed (error {})", err));
+                }
+            }
             Ok(())
         }
     }
@@ -164,7 +181,6 @@ fn save_config(app_handle: tauri::AppHandle, filename: String, data: String) -> 
     let config_dir = get_config_dir(&app_handle)?;
     std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
 
-    // 用 base64(DPAPI(data)) 写入磁盘
     let encrypted = dpapi::encrypt(data.as_bytes())?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(&encrypted);
     std::fs::write(config_dir.join(&filename), &encoded).map_err(|e| e.to_string())
@@ -195,7 +211,7 @@ fn get_config_dir_path(app_handle: tauri::AppHandle) -> Result<String, String> {
     Ok(config_dir.to_string_lossy().to_string())
 }
 
-/// 保存文件到自定义目录（不加密，用于会话库等非敏感数据）
+/// 保存文件到自定义目录（不加密）
 #[tauri::command]
 fn save_file_at_path(dir: String, filename: String, data: String) -> Result<(), String> {
     let path = std::path::Path::new(&dir);
@@ -210,7 +226,7 @@ fn load_file_from_path(dir: String, filename: String) -> Result<String, String> 
     std::fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
-// ─── Credential Manager Commands ────────────────────────────────────────
+// ─── Credential Manager Commands ───────────────────────────────────────
 
 #[tauri::command]
 fn save_credential(target: String, secret: String) -> Result<(), String> {

@@ -17,12 +17,14 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.58", features = [
-    "Win32_Security_Credentials",
-    "Win32_Data_Dpapi",
-    "Win32_Foundation",
-    "Win32_System_Memory",
-]}
+winapi = { version = "0.3", features = [
+    "dpapi",
+    "wincrypt",
+    "wincred",
+    "winbase",
+    "ntdef",
+    "errhandlingapi",
+] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
