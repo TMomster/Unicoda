@@ -1,17 +1,30 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { Conversation, Message } from "./types";
+import type { Conversation, Message, Mode, PanelMode } from "./types";
 import { useTheme, scaleToTransform } from "./contexts/ThemeContext";
 import { useModels } from "./contexts/ModelContext";
 import { ModelProvider } from "./contexts/ModelContext";
 import { LockProvider } from "./contexts/LockContext";
 import { streamChatCompletion } from "./services/modelApi";
 import { writeConfigFile, readConfigFile } from "./utils/configStorage";
+import { initBuiltinModules } from "./modules/registry";
+import {
+  buildAgentSystemPrompt,
+  parseToolCalls,
+  stripToolCalls,
+  executeToolCall,
+} from "./services/agentEngine";
+import {
+  compressConversation,
+  MIN_MESSAGES_FOR_COMPRESSION,
+} from "./services/conversationCompression";
 import LockOverlay from "./components/LockOverlay";
 import Sidebar from "./components/Sidebar";
 import ChatPanel from "./components/ChatPanel";
 import InputBar from "./components/InputBar";
 import TitleBar from "./components/TitleBar";
 import SettingsPanel from "./components/SettingsPanel";
+import ModulesPanel from "./components/ModulesPanel";
+import YoloPanel from "./components/YoloPanel";
 
 /** 将当前会话列表写入文件（仅流式完成后调用） */
 function flushConversations(convs: Conversation[], path: string) {
@@ -41,7 +54,7 @@ function makeConvTitle(existing: Conversation[], locale: string): string {
 
 // ─── Inner component that has access to ModelProvider context ──────
 function MainContent() {
-  const { scale, fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen } = useTheme();
+  const { scale, fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     try {
@@ -106,6 +119,10 @@ function MainContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const sidebarWidthRef = useRef(280);
+  const [panelMode, setPanelMode] = useState<PanelMode>("Default");
+  const handleTogglePanel = useCallback(() => {
+    setPanelMode((prev) => (prev === "Default" ? "Yolo" : "Default"));
+  }, []);
 
   // ── Model + streaming state ─────────────────────────────────────
   const { models, selectedModelId } = useModels();
@@ -164,54 +181,147 @@ function MainContent() {
 
   const handleDelete = useCallback(
     (id: string) => {
-      const nextId = conversations.find((c) => c.id !== id)?.id ?? null;
-      setConversations((prev) => {
-        const next = prev.filter((c) => c.id !== id);
-        if (next.length === 0) {
-          const fresh: Conversation = {
-            id: String(nextConvId++),
-            title: makeConvTitle(prev.filter((c) => c.id !== id), locale),
-            messages: [],
-            pinned: false,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-          return [fresh];
-        }
-        // 同步写入会话库
+      const next = conversations.filter((c) => c.id !== id);
+      if (next.length === 0) {
+        const fresh: Conversation = {
+          id: String(nextConvId++),
+          title: makeConvTitle(conversations, locale),
+          messages: [],
+          pinned: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        flushConversations([fresh], sessionPath);
+        setConversations(() => [fresh]);
+      } else {
         flushConversations(next, sessionPath);
-        return next;
-      });
+        setConversations(() => next);
+      }
       if (activeId === id) {
-        setActiveId(nextId ?? String(nextConvId));
+        setActiveId(next.length === 0 ? String(nextConvId) : next[0].id);
       }
     },
     [activeId, conversations, locale, sessionPath],
   );
 
-  // ── Send message + call model API ──────────────────────────────
-  const handleSend = useCallback(
-    async (text: string) => {
-      if (!activeId || !selectedModel) return;
-
-      // Cancel any existing streaming
-      if (abortRef.current) {
-        abortRef.current.abort();
+  const handleBatchDelete = useCallback(
+    (ids: string[]) => {
+      const idSet = new Set(ids);
+      const next = conversations.filter((c) => !idSet.has(c.id));
+      if (next.length === 0) {
+        const fresh: Conversation = {
+          id: String(nextConvId++),
+          title: makeConvTitle(conversations, locale),
+          messages: [],
+          pinned: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        flushConversations([fresh], sessionPath);
+        setConversations(() => [fresh]);
+      } else {
+        flushConversations(next, sessionPath);
+        setConversations(() => next);
       }
+      if (ids.includes(activeId)) {
+        setActiveId(next.length === 0 ? String(nextConvId) : next[0].id);
+      }
+    },
+    [activeId, conversations, locale, sessionPath],
+  );
 
-      // 1. Add user message
-      const userMsg: Message = {
-        id: String(nextMsgId++),
-        role: "user",
-        content: text,
-        timestamp: Date.now(),
-      };
+  const handleBatchTogglePin = useCallback(
+    (ids: string[], pin: boolean) => {
+      const idSet = new Set(ids);
+      const next = conversations.map((c) =>
+        idSet.has(c.id) ? { ...c, pinned: pin, updatedAt: Date.now() } : c,
+      );
+      flushConversations(next, sessionPath);
+      setConversations(() => next);
+    },
+    [conversations, sessionPath],
+  );
 
+  // ── Module system integration ──────────────────────────────
+  const [modulesOpen, setModulesOpen] = useState(false);
+  const [mode, setMode] = useState<Mode>("Chat");
+  useEffect(() => {
+    initBuiltinModules();
+  }, []);
+
+  // ── Compression state ────────────────────────────────────
+  const [compressionEnabled, setCompressionEnabled] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
+
+  // ── Send message + call model API ──────────────────────────────
+
+  /** 构建 API 消息列表（含 system prompt + 知识库，所有模式都注入基础身份） */
+  function buildApiMessages(
+    prevMessages: Message[],
+    userMsg: Message,
+    sendMode: Mode,
+  ): { role: string; content: string }[] {
+    const result: { role: string; content: string }[] = [];
+
+    // 所有模式都注入 system prompt（Agent 含完整模组协议+场景判断，Chat 含精简模组协议）
+    let systemPrompt: string;
+    if (sendMode === "Agent") {
+      systemPrompt = buildAgentSystemPrompt(sendMode, selectedModel?.systemPrompt);
+    } else {
+      // Chat 模式：基础身份 + 精简低敏感模组文档 + 知识库
+      systemPrompt = buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt);
+    }
+
+    // 追加压缩摘要
+    const kbExtra = prevMessages.find(
+      (m) => m.role === "assistant" && m.content.startsWith("[对话历史摘要]"),
+    );
+    const finalSystem =
+      systemPrompt +
+      (kbExtra
+        ? `\n\n## 前期对话摘要\n\n以下是你与用户之前对话的摘要，请注意参考：\n${kbExtra.content}`
+        : "");
+
+    result.push({ role: "system", content: finalSystem });
+
+    // 过滤掉压缩摘要消息（已注入 system prompt），加上用户消息
+    const filtered = prevMessages.filter(
+      (m) => !m.content.startsWith("[对话历史摘要]"),
+    );
+    for (const m of filtered) result.push({ role: m.role, content: m.content });
+    result.push({ role: userMsg.role, content: userMsg.content });
+    return result;
+  }
+
+  const MAX_TOOL_ROUNDS = 5;
+
+  /** Chat 模式：流式调用 → 可选 tool call（仅低敏感模组，最多 1 轮） */
+  async function handleChatSend(
+    userMsg: Message,
+    prevMessages: Message[],
+    currentMode: Mode,
+    abortController: AbortController,
+    activeId: string,
+  ) {
+    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
+
+    // 先添加 user 消息
+    updateConv(activeId, (c) => ({
+      ...c,
+      messages: [...c.messages, userMsg],
+      updatedAt: Date.now(),
+    }));
+
+    let allToolResults: { role: string; content: string }[] = [];
+    let complete = false;
+    let toolCallRound = 0;
+    const MAX_CHAT_TOOL_ROUNDS = 5;
+
+    while (!complete) {
       const assistantId = String(nextMsgId++);
       streamingMsgIdRef.current = assistantId;
 
-      // 2. Add placeholder assistant message
-      const assistantPlaceholder: Message = {
+      const placeholder: Message = {
         id: assistantId,
         role: "assistant",
         content: "",
@@ -219,95 +329,402 @@ function MainContent() {
         streaming: true,
       };
 
-      // Get current messages for API call before updating state
-      const currentConv = conversations.find((c) => c.id === activeId);
-      const prevMessages = currentConv?.messages ?? [];
-      const apiMessages = [...prevMessages, userMsg].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      // Update conv with user + placeholder
       updateConv(activeId, (c) => ({
         ...c,
-        messages: [...c.messages, userMsg, assistantPlaceholder],
+        messages: [...c.messages, placeholder],
         updatedAt: Date.now(),
       }));
 
-      setIsStreaming(true);
+      let fullContent = "";
+      let fullReasoning = "";
 
-      // 3. Start streaming API call
-      const abortController = new AbortController();
-      abortRef.current = abortController;
+      const apiMessages = [...initialApiMessages, ...allToolResults];
 
-      try {
-        let fullContent = "";
-        let fullReasoning = "";
-        for await (const chunk of streamChatCompletion(
-          selectedModel,
-          apiMessages,
-          abortController.signal,
-        )) {
-          fullContent += chunk.content;
-          fullReasoning += chunk.reasoningContent;
-          // Update assistant message content in real-time
+      for await (const chunk of streamChatCompletion(
+        selectedModel!,
+        apiMessages,
+        abortController.signal,
+      )) {
+        fullContent += chunk.content;
+        fullReasoning += chunk.reasoningContent;
+        updateConv(activeId, (c) => ({
+          ...c,
+          messages: c.messages.map((msg) =>
+            msg.id === assistantId
+              ? { ...msg, content: fullContent, reasoningContent: fullReasoning }
+              : msg,
+          ),
+          updatedAt: Date.now(),
+        }));
+      }
+
+      // 标记当前 assistant 消息完成
+      updateConv(activeId, (c) => ({
+        ...c,
+        messages: c.messages.map((msg) =>
+          msg.id === assistantId ? { ...msg, streaming: false } : msg,
+        ),
+        updatedAt: Date.now(),
+      }));
+
+      // 解析 tool call
+      const toolCalls = parseToolCalls(fullContent);
+      if (toolCalls.length === 0) {
+        complete = true;
+        const cleanContent = stripToolCalls(fullContent);
+        if (cleanContent !== fullContent) {
           updateConv(activeId, (c) => ({
             ...c,
             messages: c.messages.map((msg) =>
-              msg.id === assistantId
-                ? { ...msg, content: fullContent, reasoningContent: fullReasoning }
-                : msg,
+              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+        }
+      } else if (toolCallRound < MAX_CHAT_TOOL_ROUNDS) {
+        // 先清理可见消息中的 <tool_call> 内容，避免 JSON 泄漏到 UI
+        const cleanContent = stripToolCalls(fullContent);
+        if (cleanContent !== fullContent) {
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+        }
+        toolCallRound++;
+
+        // ── 开发者模式：在 assistant 消息上记录调试信息 ──
+        if (developerMode) {
+          const debugEntries: import("./types").ToolDebugEntry[] = toolCalls.map((c) => ({
+            round: toolCallRound - 1,
+            rawToolCall: JSON.stringify({ id: c.id, params: c.params }, null, 2),
+          }));
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId ? { ...msg, toolDebugInfo: debugEntries } : msg,
             ),
             updatedAt: Date.now(),
           }));
         }
 
-        // Mark streaming as complete
+        // 执行所有 tool call（记录耗时以便开发者模式展示）
+        const MIN_TOOL_INTERVAL_MS = 500;
+        const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const toolResults: { result: import("./services/agentEngine").ToolResult; durationMs: number }[] = [];
+        for (const call of toolCalls) {
+          const startTime = performance.now();
+          const result = await executeToolCall(call, abortController.signal);
+          const durationMs = Math.round(performance.now() - startTime);
+          toolResults.push({ result, durationMs });
+
+          const toolMsg: Message = {
+            id: String(nextMsgId++),
+            role: "tool",
+            content: result.content,
+            toolCallId: call.id,
+            toolCallError: result.error,
+            timestamp: Date.now(),
+          };
+
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: [...c.messages, toolMsg],
+            updatedAt: Date.now(),
+          }));
+
+          allToolResults.push({
+            role: "user" as const,
+            content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
+          });
+
+          // 工具调用间加间隔，避免被服务端判定为爬虫
+          if (toolCalls.length > 1) {
+            await delay(MIN_TOOL_INTERVAL_MS);
+          }
+        }
+
+        // ── 开发者模式：更新 assistant 消息上的调试信息（填入执行结果） ──
+        if (developerMode && toolResults.length > 0) {
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId && msg.toolDebugInfo
+                ? {
+                    ...msg,
+                    toolDebugInfo: msg.toolDebugInfo.map((entry, i) => ({
+                      ...entry,
+                      result: toolResults[i]?.result.content,
+                      error: toolResults[i]?.result.error,
+                      durationMs: toolResults[i]?.durationMs,
+                    })),
+                  }
+                : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+        }
+      } else {
+        // 超过最大工具调用轮数，不再执行，但清除 <tool_call> 标签
+        complete = true;
+        const cleanContent = stripToolCalls(fullContent);
+        if (cleanContent) {
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+        }
+      }
+    }
+  }
+
+  /** Agent 模式：流式调用 → 解析 tool call → 执行 → 再调 LLM */
+  async function handleAgentSend(
+    userMsg: Message,
+    prevMessages: Message[],
+    currentMode: Mode,
+    abortController: AbortController,
+    activeId: string,
+  ) {
+    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
+
+    // 先添加 user 消息（占位符由每轮循环创建）
+    updateConv(activeId, (c) => ({
+      ...c,
+      messages: [...c.messages, userMsg],
+      updatedAt: Date.now(),
+    }));
+
+    let allToolResults: { role: string; content: string }[] = [];
+    let conversionComplete = false;
+    let toolRound = 0;
+
+    while (!conversionComplete && toolRound < MAX_TOOL_ROUNDS) {
+      const assistantId = String(nextMsgId++);
+      streamingMsgIdRef.current = assistantId;
+
+      const placeholder: Message = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+        streaming: true,
+      };
+
+      updateConv(activeId, (c) => ({
+        ...c,
+        messages: [...c.messages, placeholder],
+        updatedAt: Date.now(),
+      }));
+
+      let fullContent = "";
+      let fullReasoning = "";
+
+      const apiMessages = [...initialApiMessages, ...allToolResults];
+
+      for await (const chunk of streamChatCompletion(
+        selectedModel!,
+        apiMessages,
+        abortController.signal,
+      )) {
+        fullContent += chunk.content;
+        fullReasoning += chunk.reasoningContent;
         updateConv(activeId, (c) => ({
           ...c,
           messages: c.messages.map((msg) =>
             msg.id === assistantId
-              ? { ...msg, streaming: false }
+              ? { ...msg, content: fullContent, reasoningContent: fullReasoning }
               : msg,
           ),
           updatedAt: Date.now(),
         }));
+      }
+
+      // 标记当前 assistant 消息完成
+      updateConv(activeId, (c) => ({
+        ...c,
+        messages: c.messages.map((msg) =>
+          msg.id === assistantId ? { ...msg, streaming: false } : msg,
+        ),
+        updatedAt: Date.now(),
+      }));
+
+      toolRound++;
+
+      // 解析 tool call
+      const toolCalls = parseToolCalls(fullContent);
+      if (toolCalls.length === 0) {
+        // 无 tool call → 完成，清除 tool call 标签
+        conversionComplete = true;
+        const cleanContent = stripToolCalls(fullContent);
+        if (cleanContent !== fullContent) {
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+        }
+      } else {
+        // 先清理可见消息中的 <tool_call> 内容，避免 JSON 泄漏到 UI
+        const cleanContent = stripToolCalls(fullContent);
+        if (cleanContent !== fullContent) {
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+        }
+        // ── 开发者模式：在 assistant 消息上记录调试信息 ──
+        if (developerMode) {
+          const debugEntries: import("./types").ToolDebugEntry[] = toolCalls.map((c) => ({
+            round: toolRound - 1,
+            rawToolCall: JSON.stringify({ id: c.id, params: c.params }, null, 2),
+          }));
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId ? { ...msg, toolDebugInfo: debugEntries } : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+        }
+
+        // 执行所有 tool call（记录耗时以便开发者模式展示）
+        const MIN_TOOL_INTERVAL_MS = 500;
+        const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const toolResults: { result: import("./services/agentEngine").ToolResult; durationMs: number }[] = [];
+        for (const call of toolCalls) {
+          const startTime = performance.now();
+          const result = await executeToolCall(call, abortController.signal);
+          const durationMs = Math.round(performance.now() - startTime);
+          toolResults.push({ result, durationMs });
+
+          const toolMsg: Message = {
+            id: String(nextMsgId++),
+            role: "tool",
+            content: result.content,
+            toolCallId: call.id,
+            toolCallError: result.error,
+            timestamp: Date.now(),
+          };
+
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: [...c.messages, toolMsg],
+            updatedAt: Date.now(),
+          }));
+
+          allToolResults.push({
+            role: "user" as const,
+            content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
+          });
+
+          // 工具调用间加间隔，避免被服务端判定为爬虫
+          if (toolCalls.length > 1) {
+            await delay(MIN_TOOL_INTERVAL_MS);
+          }
+        }
+
+        // ── 开发者模式：更新 assistant 消息上的调试信息（填入执行结果） ──
+        if (developerMode && toolResults.length > 0) {
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId && msg.toolDebugInfo
+                ? {
+                    ...msg,
+                    toolDebugInfo: msg.toolDebugInfo.map((entry, i) => ({
+                      ...entry,
+                      result: toolResults[i]?.result.content,
+                      error: toolResults[i]?.result.error,
+                      durationMs: toolResults[i]?.durationMs,
+                    })),
+                  }
+                : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+        }
+      }
+    }
+  }
+
+  const handleSend = useCallback(
+    async (text: string, sendMode?: Mode) => {
+      if (!activeId || !selectedModel) return;
+      const currentMode = sendMode ?? mode;
+
+      // Cancel any existing streaming
+      if (abortRef.current) {
+        abortRef.current.abort();
+      }
+
+      const userMsg: Message = {
+        id: String(nextMsgId++),
+        role: "user",
+        content: text,
+        timestamp: Date.now(),
+      };
+
+      const currentConv = conversations.find((c) => c.id === activeId);
+      const prevMessages = currentConv?.messages ?? [];
+
+      setIsStreaming(true);
+      const abortController = new AbortController();
+      abortRef.current = abortController;
+
+      try {
+        if (currentMode === "Agent") {
+          await handleAgentSend(userMsg, prevMessages, currentMode, abortController, activeId);
+        } else {
+          await handleChatSend(userMsg, prevMessages, currentMode, abortController, activeId);
+        }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") {
-          // User stopped — keep partial content
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId
-                ? { ...msg, streaming: false }
-                : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
+          const lastStreaming = streamingMsgIdRef.current;
+          if (lastStreaming) {
+            updateConv(activeId, (c) => ({
+              ...c,
+              messages: c.messages.map((msg) =>
+                msg.id === lastStreaming ? { ...msg, streaming: false } : msg,
+              ),
+              updatedAt: Date.now(),
+            }));
+          }
         } else {
-          // Show error in assistant message
           const errorMsg = err instanceof Error ? err.message : String(err);
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId
-                ? { ...msg, content: `**Error:** ${errorMsg}`, streaming: false }
-                : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
+          const lastStreaming = streamingMsgIdRef.current;
+          if (lastStreaming) {
+            updateConv(activeId, (c) => ({
+              ...c,
+              messages: c.messages.map((msg) =>
+                msg.id === lastStreaming
+                  ? { ...msg, content: `**Error:** ${errorMsg}`, streaming: false }
+                  : msg,
+              ),
+              updatedAt: Date.now(),
+            }));
+          }
         }
       } finally {
         setIsStreaming(false);
         streamingMsgIdRef.current = null;
         abortRef.current = null;
-        // 流式传输结束，将最新对话写入文件
         setTimeout(() => {
           flushConversations(conversationsRef.current, sessionPathRef.current);
         }, 0);
       }
     },
-    [activeId, selectedModel, conversations, updateConv],
+    [activeId, selectedModel, conversations, updateConv, mode],
   );
 
   const handleStop = useCallback(() => {
@@ -335,6 +752,33 @@ function MainContent() {
   }, []);
 
   const activeConv = conversations.find((c) => c.id === activeId) ?? null;
+
+  const handleToggleCompression = useCallback(() => {
+    setCompressionEnabled((v) => !v);
+  }, []);
+
+  const handleCompressNow = useCallback(async () => {
+    if (!activeConv || !selectedModel || isCompressing) return;
+    if (activeConv.messages.length < MIN_MESSAGES_FOR_COMPRESSION) return;
+    setIsCompressing(true);
+    try {
+      const result = await compressConversation(
+        activeConv.messages,
+        selectedModel,
+      );
+      if (result.summary) {
+        updateConv(activeId!, (c) => ({
+          ...c,
+          messages: result.messages,
+          updatedAt: Date.now(),
+        }));
+      }
+    } catch {
+      // silent
+    } finally {
+      setIsCompressing(false);
+    }
+  }, [activeConv, activeId, selectedModel, updateConv, isCompressing]);
 
   const transformScale = scaleToTransform(scale);
 
@@ -368,9 +812,13 @@ function MainContent() {
           onRename={handleRename}
           onTogglePin={handleTogglePin}
           onDelete={handleDelete}
+          onBatchDelete={handleBatchDelete}
+          onBatchTogglePin={handleBatchTogglePin}
           onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
           onResize={handleResizeSidebar}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenModules={() => setModulesOpen(true)}
+          onTogglePanel={handleTogglePanel}
         />
 
         {/* Main Area */}
@@ -394,7 +842,7 @@ function MainContent() {
           >
             {/* Messages */}
             {activeConv ? (
-              <ChatPanel messages={activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} t={t} />
+              <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} />
             ) : (
               <div
                 style={{
@@ -416,6 +864,14 @@ function MainContent() {
                 onSend={handleSend}
                 onStop={handleStop}
                 disabled={isStreaming}
+                messages={activeConv.messages}
+                maxTokens={selectedModel?.params?.maxTokens}
+                compressionEnabled={compressionEnabled}
+                onToggleCompression={handleToggleCompression}
+                onCompressNow={handleCompressNow}
+                isCompressing={isCompressing}
+                mode={mode}
+                onModeChange={setMode}
               />
             )}
           </div>
@@ -431,11 +887,11 @@ function MainContent() {
               display: "flex",
               flexDirection: "column",
               backgroundColor: "#0f0f11",
-              animation: "settingsFadeIn 0.2s ease",
+              animation: "fadeIn 0.2s ease",
             }}
           >
             <style>{`
-              @keyframes settingsFadeIn {
+              @keyframes fadeIn {
                 from { opacity: 0; }
                 to { opacity: 1; }
               }
@@ -443,7 +899,29 @@ function MainContent() {
             <SettingsPanel onBack={() => setSettingsOpen(false)} />
           </div>
         )}
+
+        {/* ── Modules/KB Overlay ── */}
+        {modulesOpen && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 200,
+              display: "flex",
+              flexDirection: "column",
+              backgroundColor: "#0f0f11",
+              animation: "fadeIn 0.2s ease",
+            }}
+          >
+            <ModulesPanel onBack={() => setModulesOpen(false)} />
+          </div>
+        )}
       </div>
+
+      {/* ── Yolo Panel (full-window overlay) ── */}
+      {panelMode === "Yolo" && (
+        <YoloPanel onBack={() => setPanelMode("Default")} />
+      )}
     </div>
   );
 }

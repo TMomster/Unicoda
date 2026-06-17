@@ -48,9 +48,10 @@ export async function* streamChatCompletion(
     throw new Error(`No base URL configured for provider "${model.provider}"`);
   }
 
-  // 构造消息列表：若有 systemPrompt，则作为首条 system 消息
+  // 构造消息列表：如果上层未提供 system 消息且有 systemPrompt，则补齐
   const chatMessages: { role: string; content: string }[] = [];
-  if (model.systemPrompt) {
+  const alreadyHasSystem = messages.some((m) => m.role === "system");
+  if (model.systemPrompt && !alreadyHasSystem) {
     chatMessages.push({ role: "system", content: model.systemPrompt });
   }
   chatMessages.push(...messages);

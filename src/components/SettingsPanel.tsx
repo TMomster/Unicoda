@@ -3,6 +3,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useModels } from "../contexts/ModelContext";
 import { useLock } from "../contexts/LockContext";
 import { getConfigDir } from "../utils/configStorage";
+import { invoke } from "@tauri-apps/api/core";
 import AnimatedSection from "./AnimatedSection";
 import type { ModelParams } from "../types";
 
@@ -49,7 +50,7 @@ function SE({ title, desc, children }: { title: string; desc?: string; children:
 }
 
 export default function SettingsPanel({ onBack }: Props) {
-  const { scale, setScale, selectedFontName, setSelectedFont, fontOptions, t, locale, setLocale, sessionPath, setSessionPath, userName, setUserName, userAvatar, setUserAvatar, defaultMarkdown, setDefaultMarkdown, defaultReasoningOpen, setDefaultReasoningOpen, resetSettings } = useTheme();
+  const { scale, setScale, selectedFontName, setSelectedFont, fontOptions, t, locale, setLocale, sessionPath, setSessionPath, userName, setUserName, userAvatar, setUserAvatar, defaultMarkdown, setDefaultMarkdown, defaultReasoningOpen, setDefaultReasoningOpen, developerMode, setDeveloperMode, resetSettings } = useTheme();
   const { models, selectedModelId, setSelectedModelId, addModel, updateModel, removeModel } = useModels();
   const { hasPassword, privacyEnabled, setPrivacyEnabled, idleTimeout, setIdleTimeout, startupLockEnabled, setStartupLockEnabled, setPassword, changePassword, clearPassword } = useLock();
   const pct = scale;
@@ -60,6 +61,27 @@ export default function SettingsPanel({ onBack }: Props) {
   const [cm, scm] = useState(false); const [cop, scop] = useState(""); const [cnp, scnp] = useState(""); const [ccp, sccp] = useState("");
   const [cdp, scdp] = useState<string | null>(null);
   useEffect(() => { getConfigDir().then(scdp); }, []);
+
+  // ── Cookie 管理 ──
+  const [cookieInfo, setCookieInfo] = useState<{ count: number; domains: string[]; updated_at: string } | null>(null);
+  const [cookieMsg, setCookieMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const loadCookieInfo = useCallback(async () => {
+    try {
+      const info = await invoke<{ count: number; domains: string[]; updated_at: string }>("get_cookie_info");
+      setCookieInfo(info);
+    } catch { setCookieInfo(null); }
+  }, []);
+  const clearCookies = useCallback(async () => {
+    if (!confirm(t("cookieClearConfirm"))) return;
+    try {
+      await invoke("clear_search_cookies");
+      setCookieInfo({ count: 0, domains: [], updated_at: "" });
+      setCookieMsg({ type: "ok", text: t("cookieCleared") });
+    } catch (e) {
+      setCookieMsg({ type: "err", text: String(e) });
+    }
+  }, [t]);
+  useEffect(() => { loadCookieInfo(); }, [loadCookieInfo]);
   const [recOpen, setRecOpen] = useState<string | null>(null);
   const recRef = useRef<HTMLDivElement | null>(null);
   // 点击外部关闭推荐配置下拉菜单
@@ -330,6 +352,73 @@ export default function SettingsPanel({ onBack }: Props) {
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.background = "transparent"; }}>
             {t("resetSettings")}
           </button>
+        </SE>
+        <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
+
+        <SE title={t("developerMode")} desc={t("developerModeDesc")}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.6 }}>{t("developerModeToggle")}</div>
+              <div style={{ fontSize: "11px", color: "#f59e0b", marginTop: "6px", lineHeight: 1.6 }}>⚠ {t("developerModeWarning")}</div>
+            </div>
+            <SW on={developerMode} oc={() => setDeveloperMode(!developerMode)} />
+          </div>
+        </SE>
+        <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
+
+        <SE title={t("cookieManagement")} desc={t("cookieManagementDesc")}>
+          {cookieMsg && (
+            <div
+              onClick={() => setCookieMsg(null)}
+              style={{
+                padding: "10px 12px", borderRadius: "6px", fontSize: "12px", marginBottom: "16px", lineHeight: 1.6, cursor: "pointer",
+                color: cookieMsg.type === "ok" ? "#22c55e" : "#ef4444",
+                background: cookieMsg.type === "ok" ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+              }}
+            >{cookieMsg.text}</div>
+          )}
+          <div style={{ marginBottom: "20px" }}>
+            {cookieInfo && cookieInfo.count > 0 ? (
+              <div>
+                <div style={{ fontSize: "12px", color: C.t2, lineHeight: 1.8 }}>
+                  {t("cookieCount").replace("{0}", String(cookieInfo.count)).replace("{1}", cookieInfo.domains.join(", "))}
+                </div>
+                <div style={{ fontSize: "11px", color: C.t4, lineHeight: 1.6, marginTop: "4px" }}>
+                  {t("cookieUpdated")}: {cookieInfo.updated_at}
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.6 }}>{t("cookieNoData")}</div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button onClick={clearCookies}
+              style={{
+                flex: 1, padding: "12px 0", borderRadius: "8px",
+                border: cookieInfo && cookieInfo.count > 0 ? "1px solid rgba(239,68,68,0.3)" : "1px solid #2a2a2e",
+                background: "transparent",
+                color: cookieInfo && cookieInfo.count > 0 ? "#f87171" : "#5a5a5e",
+                fontSize: "13px", fontWeight: 600, cursor: cookieInfo && cookieInfo.count > 0 ? "pointer" : "default",
+                fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => { if (cookieInfo && cookieInfo.count > 0) { e.currentTarget.style.borderColor = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.06)"; } }}
+              onMouseLeave={(e) => { if (cookieInfo && cookieInfo.count > 0) { e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.background = "transparent"; } }}
+              disabled={!cookieInfo || cookieInfo.count === 0}
+            >{t("cookieClear")}</button>
+            <button onClick={loadCookieInfo}
+              style={{
+                padding: "12px 16px", borderRadius: "8px", border: `1px solid ${C.border}`,
+                background: "transparent", color: C.t2, fontSize: "13px", fontWeight: 500,
+                cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "#141417"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+              </svg>
+            </button>
+          </div>
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 

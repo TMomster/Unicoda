@@ -20,6 +20,7 @@ interface ThemeContextType {
   userAvatar: string;
   defaultMarkdown: boolean;
   defaultReasoningOpen: boolean;
+  developerMode: boolean;
   setScale: (s: number) => void;
   setSelectedFont: (fontName: string) => void;
   setLocale: (locale: Locale) => void;
@@ -28,6 +29,7 @@ interface ThemeContextType {
   setUserAvatar: (dataUrl: string) => void;
   setDefaultMarkdown: (v: boolean) => void;
   setDefaultReasoningOpen: (v: boolean) => void;
+  setDeveloperMode: (v: boolean) => void;
   resetSettings: () => void;
 }
 
@@ -58,10 +60,10 @@ function buildFontFamily(primary: string): string {
 // 缩放基准：70% 作为 100% 标准
 const BASELINE_SCALE = 0.70;
 
-interface SavedSettings { scale: number; fontName: string; locale: Locale; sessionPath: string; userName: string; userAvatar: string; defaultMarkdown: boolean; defaultReasoningOpen: boolean; }
+interface SavedSettings { scale: number; fontName: string; locale: Locale; sessionPath: string; userName: string; userAvatar: string; defaultMarkdown: boolean; defaultReasoningOpen: boolean; developerMode: boolean; }
 
 /** 外观/行为默认值（resetSettings 会回到这些值，不含隐私和模型配置） */
-const DEFAULT_SETTINGS: SavedSettings = { scale: 100, fontName: FONT_OPTIONS[0].name, locale: "en-US" as Locale, sessionPath: "", userName: "用户", userAvatar: "", defaultMarkdown: true, defaultReasoningOpen: true };
+const DEFAULT_SETTINGS: SavedSettings = { scale: 100, fontName: FONT_OPTIONS[0].name, locale: "en-US" as Locale, sessionPath: "", userName: "用户", userAvatar: "", defaultMarkdown: true, defaultReasoningOpen: true, developerMode: false };
 
 function loadSettingsSync(): SavedSettings {
   try {
@@ -82,6 +84,7 @@ function loadSettingsSync(): SavedSettings {
         userAvatar: s.userAvatar ?? "",
         defaultMarkdown: s.defaultMarkdown ?? true,
         defaultReasoningOpen: s.defaultReasoningOpen ?? true,
+        developerMode: s.developerMode ?? false,
       };
     }
   } catch {}
@@ -164,6 +167,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setDeveloperMode = useCallback((v: boolean) => {
+    setSettings((prev) => {
+      const next = { ...prev, developerMode: v };
+      writeConfigFile(STORAGE_KEY, next);
+      return next;
+    });
+  }, []);
+
   /** 重置外观/行为配置（不含隐私和模型） */
   const resetSettings = useCallback(() => {
     setSettings((prev) => {
@@ -197,6 +208,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       userAvatar: settings.userAvatar,
       defaultMarkdown: settings.defaultMarkdown,
       defaultReasoningOpen: settings.defaultReasoningOpen,
+      developerMode: settings.developerMode,
       setScale,
       setSelectedFont,
       setLocale,
@@ -205,9 +217,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setUserAvatar,
       setDefaultMarkdown,
       setDefaultReasoningOpen,
+      setDeveloperMode,
       resetSettings,
     }),
-    [settings, fontFamily, translate, setScale, setSelectedFont, setLocale, setSessionPath, setUserName, setUserAvatar, setDefaultMarkdown, setDefaultReasoningOpen, resetSettings],
+    [settings, fontFamily, translate, setScale, setSelectedFont, setLocale, setSessionPath, setUserName, setUserAvatar, setDefaultMarkdown, setDefaultReasoningOpen, setDeveloperMode, resetSettings],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo } from "react";
+import { useRef, useEffect } from "react";
 import type { Message } from "../types";
 import { useTheme } from "../contexts/ThemeContext";
 import MessageBubble from "./MessageBubble";
@@ -6,48 +6,13 @@ import AuroraLogo from "./AuroraLogo";
 
 interface Props {
   messages: Message[];
-  maxTokens?: number;
   modelName?: string;
   userName?: string;
   userAvatar?: string;
   defaultMarkdown?: boolean;
   defaultReasoningOpen?: boolean;
+  developerMode?: boolean;
   t: (key: string) => string;
-}
-
-/**
- * 粗略估算 token 数量：中文 ~1.5 字符/token，英文 ~4 字符/token
- */
-function estimateTokens(text: string): number {
-  if (!text) return 0;
-  let chinese = 0;
-  let other = 0;
-  for (const ch of text) {
-    if (/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(ch)) {
-      chinese++;
-    } else {
-      other++;
-    }
-  }
-  return Math.round(chinese / 1.5 + other / 4);
-}
-
-/** 根据百分比返回从蓝到红的颜色 hex */
-function usageColor(pct: number): string {
-  // 蓝 (0%) → 绿 (25%) → 黄 (60%) → 橙 (80%) → 红 (100%)
-  if (pct < 25) {
-    const t = pct / 25;
-    return `hsl(${240 - t * 120}, 80%, 55%)`;  // 蓝 → 绿
-  } else if (pct < 60) {
-    const t = (pct - 25) / 35;
-    return `hsl(${120 - t * 60}, 85%, 50%)`;   // 绿 → 黄
-  } else if (pct < 80) {
-    const t = (pct - 60) / 20;
-    return `hsl(${60 - t * 30}, 90%, 50%)`;    // 黄 → 橙
-  } else {
-    const t = (pct - 80) / 20;
-    return `hsl(${30 - t * 30}, 95%, 50%)`;    // 橙 → 红
-  }
 }
 
 function WelcomeScreen() {
@@ -129,18 +94,17 @@ function Hint({ tag }: { tag: string }) {
   );
 }
 
-export default function ChatPanel({ messages, maxTokens, modelName, userName, userAvatar, defaultMarkdown, defaultReasoningOpen, t }: Props) {
+export default function ChatPanel({
+  messages,
+  modelName,
+  userName,
+  userAvatar,
+  defaultMarkdown,
+  defaultReasoningOpen,
+  developerMode,
+  t,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  // 计算上下文用量
-  const { usedTokens, pct } = useMemo(() => {
-    if (!maxTokens || maxTokens <= 0) return { usedTokens: 0, pct: 0 };
-    const total = messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
-    return {
-      usedTokens: total,
-      pct: Math.min(100, Math.round((total / maxTokens) * 100)),
-    };
-  }, [messages, maxTokens]);
 
   useEffect(() => {
     // 显式滚动容器自身，避免 scrollIntoView 在 transform scale 环境下误滚动父容器
@@ -157,6 +121,7 @@ export default function ChatPanel({ messages, maxTokens, modelName, userName, us
   return (
     <div
       ref={scrollRef}
+      className="chat-scroll"
       style={{
         flex: 1,
         overflowY: "auto",
@@ -164,55 +129,6 @@ export default function ChatPanel({ messages, maxTokens, modelName, userName, us
         position: "relative",
       }}
     >
-      {/* 上下文容量监控（粘在顶部） */}
-      {maxTokens && maxTokens > 0 && (
-        <div
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-            display: "flex",
-            justifyContent: "flex-end",
-            padding: "6px 16px",
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "4px 10px",
-              borderRadius: "6px",
-              backgroundColor: "rgba(15,15,17,0.75)",
-              backdropFilter: "blur(6px)",
-              fontSize: "11px",
-              color: "#8a8a8e",
-              userSelect: "none",
-              pointerEvents: "auto",
-            }}
-            title={`${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens`}
-          >
-            {/* 指示灯 */}
-            <span
-              style={{
-                width: "7px",
-                height: "7px",
-                borderRadius: "50%",
-                backgroundColor: usageColor(pct),
-                flexShrink: 0,
-                transition: "background-color 0.3s",
-              }}
-            />
-            <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-              {pct}%
-            </span>
-            <span style={{ color: "#5a5a5e" }}>
-              {usedTokens.toLocaleString()}/{maxTokens.toLocaleString()}
-            </span>
-          </div>
-        </div>
-      )}
       <div
         style={{
           maxWidth: "720px",
@@ -221,7 +137,7 @@ export default function ChatPanel({ messages, maxTokens, modelName, userName, us
         }}
       >
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} t={t} />
+          <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} />
         ))}
       </div>
     </div>

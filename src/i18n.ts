@@ -139,11 +139,61 @@ const zh: Record<string, string> = {
   // Avatar
   userAvatar: "用户头像",
   removeAvatar: "移除头像",
+  // Batch Management
+  batchSelect: "批量选择",
+  batchCancel: "取消选择",
+  batchSelectAll: "全选",
+  batchDeselectAll: "取消全选",
+  batchDelete: "批量删除",
+  batchDeleteConfirm: "确定要删除选中的 {0} 个会话吗？此操作不可恢复。",
+  batchPin: "批量置顶",
+  batchUnpin: "批量取消置顶",
+  batchSelected: "已选 {0} 项",
   // Delete Confirm
   deleteConfirmTitle: "确认删除",
   deleteConfirmMessage: "确定要删除此会话吗？此操作不可恢复。",
   deleteConfirm: "删除",
   cancel: "取消",
+  // Modules
+  modules: "模组",
+  modulesTitle: "模组管理",
+  noModules: "暂无可用模组",
+  moduleLevel_low: "低敏感",
+  moduleLevel_high: "高敏感",
+  moduleAvailableIn: "可用模式",
+  // Knowledge Base
+  knowledgeBase: "知识库",
+  knowledgeBaseDesc: "预装填知识库在 Agent 模式下会作为参考信息注入到系统提示词中，帮助模型更好地理解平台能力和上下文。",
+  kbEntryEnabled: "已启用",
+  kbEntryDisabled: "已禁用",
+  // Compression
+  compressionEnabled: "压缩上下文",
+  compressionHint: "将早期对话压缩为摘要，保留最近对话完整内容",
+  compressNow: "压缩旧对话",
+  compressing: "压缩中...",
+  compressed: "已压缩",
+  // Developer Mode
+  developerMode: "开发者模式",
+  developerModeDesc: "开启后，在会话中会以调试面板形式展示模组调用的原始参数、执行结果和耗时，便于追踪问题。",
+  developerModeToggle: "启用开发者模式",
+  developerModeWarning: "仅用于调试，开启后可能增加会话信息量。",
+  // Cookie Management
+  cookieManagement: "Cookie 管理",
+  cookieManagementDesc: "联网搜索模组使用 Cookie 来维持 Bing 搜索的登录态和偏好设置。存储的 Cookie 会在应用重启后保留。",
+  cookieCount: "已存储 {0} 个 Cookie，域名：{1}",
+  cookieNoData: "暂无已存储的 Cookie",
+  cookieClear: "清除 Cookie",
+  cookieClearConfirm: "确认清除所有已存储的搜索 Cookie？下次搜索时将重新建立会话。",
+  cookieCleared: "Cookie 已清除",
+  cookieUpdated: "最近更新",
+  // Yolo Panel
+  yoloWelcome: "We talk, We code.",
+  yoloPanel: "Yolo 面板",
+  yoloWorkspace: "工作区",
+  yoloNoWorkspace: "暂无工作区",
+  yoloSelectFolder: "选择工作区文件夹",
+  yoloWorkspaceDesc: "工作区是 Yolo 模式下用于存放项目文件的目录。",
+  yoloMode: "Yolo",
 };
 
 const en: Record<string, string> = {
@@ -276,11 +326,61 @@ const en: Record<string, string> = {
   // Avatar
   userAvatar: "Avatar",
   removeAvatar: "Remove Avatar",
+  // Batch Management
+  batchSelect: "Batch Select",
+  batchCancel: "Cancel Selection",
+  batchSelectAll: "Select All",
+  batchDeselectAll: "Deselect All",
+  batchDelete: "Batch Delete",
+  batchDeleteConfirm: "Delete {0} selected sessions? This action cannot be undone.",
+  batchPin: "Batch Pin",
+  batchUnpin: "Batch Unpin",
+  batchSelected: "{0} selected",
   // Delete Confirm
   deleteConfirmTitle: "Confirm Delete",
   deleteConfirmMessage: "Are you sure you want to delete this session? This action cannot be undone.",
   deleteConfirm: "Delete",
   cancel: "Cancel",
+  // Modules
+  modules: "Modules",
+  modulesTitle: "Module Manager",
+  noModules: "No modules available",
+  moduleLevel_low: "Low",
+  moduleLevel_high: "High",
+  moduleAvailableIn: "Available in",
+  // Knowledge Base
+  knowledgeBase: "Knowledge Base",
+  knowledgeBaseDesc: "Pre-filled knowledge entries are injected into the system prompt in Agent mode, helping the model better understand platform capabilities and context.",
+  kbEntryEnabled: "Enabled",
+  kbEntryDisabled: "Disabled",
+  // Compression
+  compressionEnabled: "Compress",
+  compressionHint: "Compress early conversation into summary, keeping recent rounds intact",
+  compressNow: "Compress Old",
+  compressing: "Compressing...",
+  compressed: "Compressed",
+  // Developer Mode
+  developerMode: "Developer Mode",
+  developerModeDesc: "When enabled, a debug panel shows raw module call parameters, execution results, and timing in the chat session for troubleshooting.",
+  developerModeToggle: "Enable Developer Mode",
+  developerModeWarning: "For debugging only. May increase message verbosity.",
+  // Cookie Management
+  cookieManagement: "Cookie Management",
+  cookieManagementDesc: "The web search module uses cookies to maintain Bing search session and preferences. Stored cookies persist across app restarts.",
+  cookieCount: "{0} cookies stored for: {1}",
+  cookieNoData: "No cookies stored",
+  cookieClear: "Clear Cookies",
+  cookieClearConfirm: "Clear all stored search cookies? A new session will be established on the next search.",
+  cookieCleared: "Cookies cleared",
+  cookieUpdated: "Last updated",
+  // Yolo Panel
+  yoloWelcome: "We talk, We code.",
+  yoloPanel: "Yolo Panel",
+  yoloWorkspace: "Workspace",
+  yoloNoWorkspace: "No workspace",
+  yoloSelectFolder: "Select workspace folder",
+  yoloWorkspaceDesc: "The workspace directory for storing project files in Yolo mode.",
+  yoloMode: "Yolo",
 };
 
 const ALL: Record<Locale, Record<string, string>> = { "zh-CN": zh, "en-US": en };
