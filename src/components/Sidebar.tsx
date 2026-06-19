@@ -19,8 +19,9 @@ interface Props {
   onToggleCollapse: () => void;
   onResize: (width: number) => void;
   onOpenSettings: () => void;
-  onOpenModules: () => void;
+  onOpenComponents: () => void;
   onTogglePanel: () => void;
+  onPrint: () => void;
 }
 
 export default function Sidebar({
@@ -38,8 +39,9 @@ export default function Sidebar({
   onToggleCollapse,
   onResize,
   onOpenSettings,
-  onOpenModules,
+  onOpenComponents,
   onTogglePanel,
+  onPrint,
 }: Props) {
   const { t, userName, userAvatar, setUserName } = useTheme();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -142,29 +144,36 @@ export default function Sidebar({
   const collapsedBar = (
     <div style={{ position: "absolute", left: 0, top: 0, width: "48px", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: "12px", gap: "12px", opacity: collapsed ? 1 : 0, transition: "opacity 0.18s ease", pointerEvents: collapsed ? "auto" : "none", zIndex: collapsed ? 2 : 1 }}>
       <AuroraLogo size={28} onClick={onTogglePanel} title={t("yoloPanel")} />
-      <button onClick={onOpenSettings} title={t("settings")} style={{ ...iconBtn, color: "#5a5a5e" }}
-        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; e.currentTarget.style.color = "#8a8a8e"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#5a5a5e"; }}>
+      <button onClick={onOpenSettings} title={t("settings")} style={{ ...iconBtn, color: "var(--c-t4)" }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; e.currentTarget.style.color = "var(--c-t6)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "var(--c-t4)"; }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
       </button>
-      <button onClick={onOpenModules} title={t("modules")} style={{ ...iconBtn, color: "#5a5a5e" }}
-        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; e.currentTarget.style.color = "#8a8a8e"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#5a5a5e"; }}>
+      <button onClick={onOpenComponents} title={t("components")} style={{ ...iconBtn, color: "var(--c-t4)" }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; e.currentTarget.style.color = "var(--c-t6)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "var(--c-t4)"; }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
         </svg>
       </button>
-      <button onClick={onCreate} title={t("newConversation")} style={{ ...iconBtn, color: "#6a6a6e" }}
-        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; e.currentTarget.style.color = "#a0a0a0"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+      <button onClick={onCreate} title={t("newConversation")} style={{ ...iconBtn, color: "var(--c-t5)" }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; e.currentTarget.style.color = "var(--c-t2)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "var(--c-t5)"; }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
         </svg>
       </button>
-      <button onClick={onToggleCollapse} title={t("expandSidebar")} style={{ ...iconBtn, color: "#6a6a6e" }}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#1e1e22")}
+      <button onClick={onPrint} title={t("print")} style={{ ...iconBtn, color: "var(--c-t5)" }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; e.currentTarget.style.color = "var(--c-t2)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "var(--c-t5)"; }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" rx="1" />
+        </svg>
+      </button>
+      <button onClick={onToggleCollapse} title={t("expandSidebar")} style={{ ...iconBtn, color: "var(--c-t5)" }}
+        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--c-bg3)")}
         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="9 18 15 12 9 6" />
@@ -188,8 +197,8 @@ export default function Sidebar({
   return (
     <div style={{
       width: `${effectiveWidth}px`, minWidth: `${effectiveWidth}px`, height: "100%",
-      display: "flex", flexDirection: "column", backgroundColor: "#141417",
-      borderRight: "1px solid #2a2a2e", position: "relative", overflow: "hidden",
+      display: "flex", flexDirection: "column", backgroundColor: "var(--c-bg)",
+      borderRight: "1px solid var(--c-bd)", position: "relative", overflow: "hidden",
       transition: "width 0.28s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.28s cubic-bezier(0.4, 0, 0.2, 1)",
       userSelect: dragging ? "none" : undefined,
     }}>
@@ -207,11 +216,11 @@ export default function Sidebar({
         <div style={{ padding: "14px 12px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <AuroraLogo size={28} onClick={onTogglePanel} title={t("yoloPanel")} style={{ cursor: "pointer" }} />
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "#c0c0c0" }}>Unison</span>
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--c-txt)" }}>Unison</span>
           </div>
           <button onClick={onToggleCollapse} title={t("collapseSidebar")}
-            style={{ width: "24px", height: "24px", borderRadius: "6px", border: "none", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#1e1e22")}
+            style={{ width: "24px", height: "24px", borderRadius: "6px", border: "none", background: "transparent", color: "var(--c-t5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--c-bg3)")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           </button>
@@ -220,42 +229,51 @@ export default function Sidebar({
         {/* Conversations view */}
         <div style={{ padding: "0 12px", marginBottom: "10px", display: "flex", flexDirection: "column", gap: "6px" }}>
           <button onClick={onOpenSettings} title={t("settings")}
-            style={{ width: "100%", padding: "7px 0", borderRadius: "8px", border: "1px solid #2a2a2e", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; e.currentTarget.style.color = "#a0a0a0"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+            style={{ width: "100%", padding: "7px 0", borderRadius: "8px", border: "1px solid var(--c-bd)", background: "transparent", color: "var(--c-t5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; e.currentTarget.style.color = "var(--c-t2)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "var(--c-t5)"; }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
             {t("sidebarSettings")}
           </button>
-          <button onClick={onOpenModules} title={t("modules")}
-            style={{ width: "100%", padding: "7px 0", borderRadius: "8px", border: "1px solid #2a2a2e", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; e.currentTarget.style.color = "#a0a0a0"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+          <button onClick={onOpenComponents} title={t("components")}
+            style={{ width: "100%", padding: "7px 0", borderRadius: "8px", border: "1px solid var(--c-bd)", background: "transparent", color: "var(--c-t5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; e.currentTarget.style.color = "var(--c-t2)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "var(--c-t5)"; }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
-            {t("modules")}
+            {t("components")}
+          </button>
+          <button onClick={onPrint} title={t("print")}
+            style={{ width: "100%", padding: "7px 0", borderRadius: "8px", border: "1px solid var(--c-bd)", background: "transparent", color: "var(--c-t5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; e.currentTarget.style.color = "var(--c-t2)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "var(--c-t5)"; }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" rx="1" />
+            </svg>
+            {t("print")}
           </button>
         </div>
 
         <div style={{ padding: "0 12px 10px" }}>
           <button onClick={onCreate}
-            style={{ width: "100%", padding: "8px 0", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", fontSize: "13px", fontWeight: 500, cursor: "pointer", transition: "background 0.15s", fontFamily: "inherit" }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#1d4ed8")}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#2563eb")}>
+            style={{ width: "100%", padding: "8px 0", borderRadius: "8px", border: "none", backgroundColor: "var(--c-ac)", color: "#fff", fontSize: "13px", fontWeight: 500, cursor: "pointer", transition: "background 0.15s", fontFamily: "inherit" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--c-ah)")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "var(--c-ac)")}>
             {t("newChat")}
           </button>
         </div>
 
         {/* Search */}
         <div style={{ padding: "0 12px 10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "7px 10px", borderRadius: "8px", backgroundColor: "#1a1a1e", border: "1px solid #2a2a2e" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a5a5e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "7px 10px", borderRadius: "8px", backgroundColor: "var(--c-bg2)", border: "1px solid var(--c-bd)" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--c-t4)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("searchConversations")}
-              style={{ flex: 1, border: "none", background: "transparent", color: "#c0c0c0", fontSize: "13px", outline: "none", fontFamily: "inherit" }} />
+              style={{ flex: 1, border: "none", background: "transparent", color: "var(--c-txt)", fontSize: "13px", outline: "none", fontFamily: "inherit" }} />
           </div>
         </div>
 
@@ -270,13 +288,13 @@ export default function Sidebar({
               setLastClickedId(null);
             }
           }}
-            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid #2a2a2e", background: "transparent", color: "#a0a0a0", cursor: "pointer", fontSize: "11px", transition: "all 0.15s", fontFamily: "inherit", whiteSpace: "nowrap" }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; }}
+            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--c-bd)", background: "transparent", color: "var(--c-t2)", cursor: "pointer", fontSize: "11px", transition: "all 0.15s", fontFamily: "inherit", whiteSpace: "nowrap" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}>
             {selectedIds.size === filtered.length ? t("batchDeselectAll") : t("batchSelectAll")}
           </button>
           {selectedIds.size > 0 && (
-            <span style={{ fontSize: "11px", color: "#6a6a6e", flex: 1, textAlign: "right" }}>
+            <span style={{ fontSize: "11px", color: "var(--c-t5)", flex: 1, textAlign: "right" }}>
               {t("batchSelected").replace("{0}", String(selectedIds.size))}
             </span>
           )}
@@ -285,7 +303,7 @@ export default function Sidebar({
         {/* Conversation List */}
         <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
           {filtered.length === 0 && (
-            <div style={{ padding: "32px 16px", textAlign: "center", fontSize: "13px", color: "#5a5a5e" }}>
+            <div style={{ padding: "32px 16px", textAlign: "center", fontSize: "13px", color: "var(--c-t4)" }}>
               {query ? t("noMatchConversations") : t("noConversations")}
             </div>
           )}
@@ -327,11 +345,11 @@ export default function Sidebar({
                 // 点击标题区域 -> 导航
                 onSelect(conv.id);
               }} onDoubleClick={() => startRename(conv)} onContextMenu={(e) => { e.preventDefault(); setContextMenuId(conv.id); }}
-                style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "8px", cursor: "pointer", marginBottom: "2px", backgroundColor: isSelected ? "#1e3a5f" : (activeId === conv.id ? "#1e1e22" : "transparent"), transition: "background 0.15s" }}
-                onMouseEnter={(e) => { if (!isSelected && activeId !== conv.id) e.currentTarget.style.backgroundColor = "#1a1a1e"; }}
+                style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "8px", cursor: "pointer", marginBottom: "2px", backgroundColor: isSelected ? "#1e3a5f" : (activeId === conv.id ? "var(--c-bg3)" : "transparent"), transition: "background 0.15s" }}
+                onMouseEnter={(e) => { if (!isSelected && activeId !== conv.id) e.currentTarget.style.backgroundColor = "var(--c-bg2)"; }}
                 onMouseLeave={(e) => { if (!isSelected && activeId !== conv.id) e.currentTarget.style.backgroundColor = "transparent"; }}>
                 {/* 始终显示复选框 */}
-                <div data-checkbox style={{ width: "16px", height: "16px", borderRadius: "4px", border: isSelected ? "none" : "1.5px solid #4a4a4e", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: isSelected ? "#2563eb" : "transparent", transition: "all 0.15s" }}>
+                <div data-checkbox style={{ width: "16px", height: "16px", borderRadius: "4px", border: isSelected ? "none" : "1.5px solid #4a4a4e", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: isSelected ? "var(--c-ac)" : "transparent", transition: "all 0.15s" }}>
                   {isSelected && (
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="20 6 9 17 4 12" />
@@ -343,17 +361,17 @@ export default function Sidebar({
                   <input ref={inputRef} value={editValue} onChange={(e) => setEditValue(e.target.value)} onBlur={commitRename}
                     onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setEditingId(null); }}
                     onClick={(e) => e.stopPropagation()}
-                    style={{ flex: 1, background: "#1a1a1e", border: "1px solid #3a3a3e", borderRadius: "4px", color: "#e0e0e0", fontSize: "13px", padding: "2px 6px", outline: "none", fontFamily: "inherit" }} />
+                    style={{ flex: 1, background: "var(--c-bg2)", border: "1px solid var(--c-bd2)", borderRadius: "4px", color: "var(--c-txt)", fontSize: "13px", padding: "2px 6px", outline: "none", fontFamily: "inherit" }} />
                 ) : (
-                  <span style={{ flex: 1, fontSize: "13px", color: isSelected ? "#e0e0e0" : (activeId === conv.id ? "#e0e0e0" : "#a0a0a0"), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.title}</span>
+                  <span style={{ flex: 1, fontSize: "13px", color: isSelected ? "var(--c-txt)" : (activeId === conv.id ? "var(--c-txt)" : "var(--c-t2)"), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.title}</span>
                 )}
-                <span style={{ fontSize: "11px", color: "#5a5a5e", flexShrink: 0 }}>{conv.messages.length}</span>
+                <span style={{ fontSize: "11px", color: "var(--c-t4)", flexShrink: 0 }}>{conv.messages.length}</span>
               </div>
               {contextMenuId === conv.id && (
-                <div style={{ position: "absolute", right: "8px", top: "100%", zIndex: 100, backgroundColor: "#1e1e22", border: "1px solid #39393e", borderRadius: "8px", padding: "4px", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", minWidth: "130px" }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ position: "absolute", right: "8px", top: "100%", zIndex: 100, backgroundColor: "var(--c-bg3)", border: "1px solid var(--c-bd2)", borderRadius: "8px", padding: "4px", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", minWidth: "130px" }} onClick={(e) => e.stopPropagation()}>
                   <CMItem onClick={() => { startRename(conv); setContextMenuId(null); }}>{t("contextRename")}</CMItem>
                   <CMItem onClick={() => { onTogglePin(conv.id); setContextMenuId(null); }}>{conv.pinned ? t("contextUnpin") : t("contextPin")}</CMItem>
-                  <div style={{ height: "1px", backgroundColor: "#2a2a2e", margin: "4px 0" }} />
+                  <div style={{ height: "1px", backgroundColor: "var(--c-bd)", margin: "4px 0" }} />
                   <CMItem danger onClick={() => { setConfirmDeleteId(conv.id); setContextMenuId(null); }}>{t("contextDelete")}</CMItem>
                 </div>
               )}
@@ -364,13 +382,13 @@ export default function Sidebar({
 
         {/* Batch Action Bar */}
         {selectedIds.size > 0 && (
-          <div style={{ padding: "8px 8px 10px", borderTop: "1px solid #2a2a2e", display: "flex", gap: "6px", flexShrink: 0 }}>
+          <div style={{ padding: "8px 8px 10px", borderTop: "1px solid var(--c-bd)", display: "flex", gap: "6px", flexShrink: 0 }}>
             <button onClick={() => {
               const allPinned = filtered.filter((c) => selectedIds.has(c.id)).every((c) => c.pinned);
               onBatchTogglePin(Array.from(selectedIds), !allPinned);
             }}
-              style={{ flex: 1, padding: "8px 0", borderRadius: "6px", border: "1px solid #2a2a2e", background: "transparent", color: "#a0a0a0", cursor: "pointer", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; }}
+              style={{ flex: 1, padding: "8px 0", borderRadius: "6px", border: "1px solid var(--c-bd)", background: "transparent", color: "var(--c-t2)", cursor: "pointer", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bg3)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}>
               {filtered.filter((c) => selectedIds.has(c.id)).every((c) => c.pinned) ? t("batchUnpin") : t("batchPin")}
             </button>
@@ -384,7 +402,7 @@ export default function Sidebar({
         )}
 
         {/* 用户信息 - 底部 */}
-        <div style={{ borderTop: "1px solid #2a2a2e", padding: "10px 12px", flexShrink: 0 }}>
+        <div style={{ borderTop: "1px solid var(--c-bd)", padding: "10px 12px", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div style={{ width: "26px", height: "26px", borderRadius: "5px", backgroundColor: "#000", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 700, flexShrink: 0, userSelect: "none", overflow: "hidden" }}>
               {userAvatar ? (
@@ -397,10 +415,10 @@ export default function Sidebar({
               <input ref={userNameInputRef} value={userNameEditValue} onChange={(e) => setUserNameEditValue(e.target.value)}
                 onBlur={commitUserName}
                 onKeyDown={(e) => { if (e.key === "Enter") commitUserName(); if (e.key === "Escape") setEditingUserName(false); }}
-                style={{ flex: 1, background: "#1a1a1e", border: "1px solid #3a3a3e", borderRadius: "4px", color: "#e0e0e0", fontSize: "13px", padding: "3px 6px", outline: "none", fontFamily: "inherit" }} />
+                style={{ flex: 1, background: "var(--c-bg2)", border: "1px solid var(--c-bd2)", borderRadius: "4px", color: "var(--c-txt)", fontSize: "13px", padding: "3px 6px", outline: "none", fontFamily: "inherit" }} />
             ) : (
               <span onClick={() => { setEditingUserName(true); setUserNameEditValue(userName); }}
-                style={{ flex: 1, fontSize: "13px", color: "#a0a0a0", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", userSelect: "none", padding: "2px 0" }}
+                style={{ flex: 1, fontSize: "13px", color: "var(--c-t2)", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", userSelect: "none", padding: "2px 0" }}
                 title={t("clickToEdit")}>
                 {userName}
               </span>
@@ -441,7 +459,7 @@ export default function Sidebar({
       {/* Drag handle */}
       <div onMouseDown={handleResizeStart} onMouseEnter={() => setDragHovered(true)} onMouseLeave={() => setDragHovered(false)}
         style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: "5px", cursor: "col-resize", zIndex: 50 }}>
-        <div style={{ position: "absolute", right: "1px", top: 0, bottom: 0, width: "2px", backgroundColor: dragging || dragHovered ? "#3a3a3e" : "transparent", transition: "background 0.15s" }} />
+        <div style={{ position: "absolute", right: "1px", top: 0, bottom: 0, width: "2px", backgroundColor: dragging || dragHovered ? "var(--c-bd2)" : "transparent", transition: "background 0.15s" }} />
       </div>
     </div>
   );
@@ -463,11 +481,11 @@ function CMItem({
         padding: "7px 10px",
         borderRadius: "6px",
         fontSize: "13px",
-        color: danger ? "#ef4444" : "#c0c0c0",
+        color: danger ? "#ef4444" : "var(--c-txt)",
         cursor: "pointer",
         transition: "background 0.15s",
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#2a2a2e")}
+      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--c-bd)")}
       onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
     >
       {children}

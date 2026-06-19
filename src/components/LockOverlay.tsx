@@ -103,8 +103,8 @@ export default function LockOverlay({ locale, yolo }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 9999,
-        backgroundColor: yolo ? "transparent" : "#0a0a0c",
+        zIndex: 999999,
+        backgroundColor: yolo ? "transparent" : "var(--c-bg)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -117,7 +117,13 @@ export default function LockOverlay({ locale, yolo }: Props) {
       }}
     >
       <style>{`
-        .lock-pw-input::placeholder { color: ${yolo ? "rgba(255,255,255,0.4)" : "#5a5a5e"} !important; }
+        .lock-pw-input::placeholder { color: ${yolo ? "rgba(255,255,255,0.4)" : "var(--c-t4)"} !important; }
+        /* Hide native password reveal button (Edge/WebView2, Chrome, etc.) */
+        .lock-pw-input::-ms-reveal,
+        .lock-pw-input::-ms-clear,
+        .lock-pw-input::-webkit-credentials-auto-fill-button,
+        .lock-pw-input::-webkit-textfield-decoration-container,
+        .lock-pw-input::-webkit-password-toggle { display: none; }
       `}</style>
       {/* Yolo mode: animated aurora background behind the lock card */}
       {yolo && <AuroraBackground />}
@@ -150,7 +156,7 @@ export default function LockOverlay({ locale, yolo }: Props) {
             height: "36px",
             border: "none",
             background: "transparent",
-            color: "#8a8a8e",
+            color: "var(--c-t6)",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -171,7 +177,7 @@ export default function LockOverlay({ locale, yolo }: Props) {
             height: "36px",
             border: "none",
             background: "transparent",
-            color: "#8a8a8e",
+            color: "var(--c-t6)",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -182,7 +188,7 @@ export default function LockOverlay({ locale, yolo }: Props) {
           onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)")}
           onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
         >
-          {isMaximized ? <RestoreIcon bgFill="#0a0a0c" /> : <MaximizeIcon />}
+          {isMaximized ? <RestoreIcon bgFill="transparent" /> : <MaximizeIcon />}
         </button>
         {/* Close */}
         <button
@@ -192,7 +198,7 @@ export default function LockOverlay({ locale, yolo }: Props) {
             height: "36px",
             border: "none",
             background: "transparent",
-            color: "#8a8a8e",
+            color: "var(--c-t6)",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -206,7 +212,7 @@ export default function LockOverlay({ locale, yolo }: Props) {
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.backgroundColor = "transparent";
-            e.currentTarget.style.color = "#8a8a8e";
+            e.currentTarget.style.color = "var(--c-t6)";
           }}
         >
           <CloseIcon />
@@ -241,7 +247,7 @@ export default function LockOverlay({ locale, yolo }: Props) {
           style={{
             fontSize: "18px",
             fontWeight: 500,
-            color: yolo ? "rgba(255,255,255,0.55)" : "#6a6a6e",
+            color: yolo ? "rgba(255,255,255,0.55)" : "var(--c-t5)",
             letterSpacing: "2px",
           }}
         >
@@ -272,9 +278,9 @@ export default function LockOverlay({ locale, yolo }: Props) {
                 width: "100%",
                 padding: "12px 42px 12px 16px",
                 borderRadius: "10px",
-                border: `1px solid ${error ? "#ef4444" : yolo ? "rgba(255,255,255,0.12)" : "#2a2a2e"}`,
-                backgroundColor: yolo ? "rgba(255,255,255,0.04)" : "#141417",
-                color: "#e0e0e0",
+                border: `1px solid ${error ? "#ef4444" : yolo ? "rgba(255,255,255,0.12)" : "var(--c-bd)"}`,
+                backgroundColor: yolo ? "rgba(255,255,255,0.04)" : "var(--c-bg2)",
+                color: "var(--c-txt)",
                 fontSize: "15px",
                 fontFamily: "inherit",
                 outline: "none",
@@ -285,10 +291,10 @@ export default function LockOverlay({ locale, yolo }: Props) {
                 ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
               }}
               onFocus={(e) => {
-                if (!error) e.currentTarget.style.borderColor = yolo ? "rgba(100,180,255,0.5)" : "#2563eb";
+                if (!error) e.currentTarget.style.borderColor = yolo ? "rgba(100,180,255,0.5)" : "var(--c-ac)";
               }}
               onBlur={(e) => {
-                if (!error) e.currentTarget.style.borderColor = yolo ? "rgba(255,255,255,0.12)" : "#2a2a2e";
+                if (!error) e.currentTarget.style.borderColor = yolo ? "rgba(255,255,255,0.12)" : "var(--c-bd)";
               }}
               disabled={unlocking}
             />
@@ -306,15 +312,15 @@ export default function LockOverlay({ locale, yolo }: Props) {
                 borderRadius: "6px",
                 border: "none",
                 background: "transparent",
-                color: yolo ? "rgba(255,255,255,0.6)" : "#e0e0e0",
+                color: yolo ? "rgba(255,255,255,0.6)" : "var(--c-txt)",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 transition: "all 0.12s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#fff"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.6)" : "#e0e0e0"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "var(--c-txt)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.6)" : "var(--c-txt)"; }}
             >
               {showPassword ? (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -340,8 +346,8 @@ export default function LockOverlay({ locale, yolo }: Props) {
               padding: "10px 0",
               borderRadius: "10px",
               border: yolo ? "1px solid rgba(59,130,246,0.25)" : "none",
-              backgroundColor: password && !unlocking ? (yolo ? "rgba(37,99,235,0.55)" : "#2563eb") : (yolo ? "rgba(255,255,255,0.04)" : "#1a1a1e"),
-              color: password && !unlocking ? "#fff" : (yolo ? "rgba(255,255,255,0.3)" : "#5a5a5e"),
+              backgroundColor: password && !unlocking ? (yolo ? "rgba(37,99,235,0.55)" : "var(--c-ac)") : (yolo ? "rgba(255,255,255,0.04)" : "var(--c-bg2)"),
+              color: password && !unlocking ? "#fff" : (yolo ? "rgba(255,255,255,0.3)" : "var(--c-t4)"),
               fontSize: "14px",
               fontWeight: 600,
               cursor: password && !unlocking ? "pointer" : "default",
@@ -350,12 +356,12 @@ export default function LockOverlay({ locale, yolo }: Props) {
             }}
             onMouseEnter={(e) => {
               if (password && !unlocking) {
-                e.currentTarget.style.backgroundColor = "#1d4ed8";
+                e.currentTarget.style.backgroundColor = "var(--c-ah)";
               }
             }}
             onMouseLeave={(e) => {
               if (password && !unlocking) {
-                e.currentTarget.style.backgroundColor = "#2563eb";
+                e.currentTarget.style.backgroundColor = "var(--c-ac)";
               }
             }}
           >
@@ -388,7 +394,7 @@ export default function LockOverlay({ locale, yolo }: Props) {
             position: "absolute",
             bottom: "32px",
             fontSize: "11px",
-            color: "#4a4a4e",
+            color: "var(--c-t4)",
             textAlign: "center",
             lineHeight: 1.6,
           }}

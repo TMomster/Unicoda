@@ -47,7 +47,7 @@ export default function TitleBar({ title }: Props) {
     height: "100%",
     border: "none",
     background: "transparent",
-    color: "#8a8a8e",
+    color: "var(--c-t5)",
     cursor: "pointer",
     display: "flex",
     alignItems: "center",
@@ -64,9 +64,9 @@ export default function TitleBar({ title }: Props) {
         minHeight: "36px",
         display: "flex",
         alignItems: "center",
-        backgroundColor: "#141417",
+        backgroundColor: "var(--c-bg)",
         userSelect: "none",
-        borderBottom: "1px solid #2a2a2e",
+        borderBottom: "1px solid var(--c-bd)",
       }}
     >
       {/* Drag region + title */}
@@ -84,7 +84,7 @@ export default function TitleBar({ title }: Props) {
           style={{
             fontSize: "13px",
             fontWeight: 500,
-            color: "#8a8a8e",
+            color: "var(--c-t5)",
             letterSpacing: "0.3px",
           }}
         >
@@ -97,7 +97,7 @@ export default function TitleBar({ title }: Props) {
         onClick={handleMinimize}
         style={btnCommon}
         title={t("minimize")}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#2a2a2e")}
+        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--c-bd)")}
         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
       >
         <MinimizeIcon />
@@ -107,7 +107,7 @@ export default function TitleBar({ title }: Props) {
         onClick={handleToggleMax}
         style={btnCommon}
         title={maximized ? t("restore") : t("maximize")}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#2a2a2e")}
+        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--c-bd)")}
         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
       >
         {maximized ? <RestoreIcon /> : <MaximizeIcon />}

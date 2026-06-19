@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import type { Message } from "../types";
 import MarkdownRenderer from "./MarkdownRenderer";
 
+import type { FileAttachment } from "../types";
+
 interface Props {
   message: Message;
   modelName?: string;
@@ -13,6 +15,8 @@ interface Props {
   t: (key: string) => string;
   /** Yolo 玻璃模式风格 */
   yolo?: boolean;
+  /** 点击文件附件预览回调 */
+  onPreviewFile?: (file: FileAttachment) => void;
 }
 
 const animations = `
@@ -54,7 +58,52 @@ const animations = `
 .double-helix .dot:nth-child(8) { background: #818cf8; animation-delay: 0.7s; }
 `;
 
-export default function MessageBubble({ message, modelName, userName, userAvatar, defaultMarkdown = true, defaultReasoningOpen = false, developerMode = false, t, yolo }: Props) {
+// ── 复制按钮组件 ──
+function CopyBtn({ text, yolo }: { text: string; yolo?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      style={{
+        border: "none",
+        background: "transparent",
+        cursor: "pointer",
+        padding: "2px 6px",
+        fontSize: "12px",
+        lineHeight: 1,
+        color: copied ? "#22c55e" : yolo ? "rgba(255,255,255,0.35)" : "var(--c-t4)",
+        userSelect: "none",
+        transition: "color 0.15s",
+        flexShrink: 0,
+      }}
+      title={copied ? "已复制" : "复制"}
+      onMouseEnter={(e) => {
+        if (!copied) e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.7)" : "var(--c-t2)";
+      }}
+      onMouseLeave={(e) => {
+        if (!copied) e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.35)" : "var(--c-t4)";
+      }}
+    >
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+export default function MessageBubble({ message, modelName, userName, userAvatar, defaultMarkdown = true, defaultReasoningOpen = false, developerMode = false, t, yolo, onPreviewFile }: Props) {
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
   const isStreaming = message.streaming;
@@ -91,7 +140,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
         display: "flex",
         gap: "12px",
         padding: "16px 0",
-        borderBottom: yolo ? "1px solid rgba(255,255,255,0.04)" : "1px solid #1a1a1e",
+        borderBottom: yolo ? "1px solid rgba(255,255,255,0.04)" : "1px solid var(--c-bg2)",
       }}
     >
       {/* Avatar */}
@@ -109,7 +158,6 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
           backgroundColor: yolo
             ? (isUser ? "rgba(255,255,255,0.04)" : isTool ? "rgba(124,58,237,0.2)" : "rgba(20,184,166,0.2)")
             : (isUser ? "#000" : isTool ? "#7c3aed" : "#14b8a6"),
-          ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
           color: "#fff",
           userSelect: "none",
           overflow: "hidden",
@@ -147,7 +195,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               style={{
                 border: "none",
                 background: "transparent",
-                color: useMarkdown ? "#3b82f6" : "#4a4a4e",
+                color: useMarkdown ? "var(--c-ac)" : "var(--c-t4)",
                 fontSize: "11px",
                 fontWeight: 700,
                 cursor: "pointer",
@@ -156,8 +204,8 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                 letterSpacing: "0.5px",
                 transition: "color 0.15s",
               }}
-              onMouseEnter={(e) => { if (!useMarkdown) e.currentTarget.style.color = "#6a6a6e"; }}
-              onMouseLeave={(e) => { if (!useMarkdown) e.currentTarget.style.color = "#4a4a4e"; }}
+              onMouseEnter={(e) => { if (!useMarkdown) e.currentTarget.style.color = "var(--c-t2)"; }}
+              onMouseLeave={(e) => { if (!useMarkdown) e.currentTarget.style.color = "var(--c-t4)"; }}
             >
               M
             </button>
@@ -170,9 +218,8 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
             style={{
               marginBottom: "12px",
               borderRadius: "8px",
-              border: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid #2a2a2e",
+              border: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid var(--c-bd)",
               overflow: "hidden",
-              ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
             }}
           >
             <div
@@ -186,12 +233,12 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                 userSelect: "none",
                 fontSize: "12px",
                 fontWeight: 600,
-                color: yolo ? "rgba(255,255,255,0.65)" : "#a0a0a0",
-                background: yolo ? "rgba(255,255,255,0.03)" : "#151518",
+                color: yolo ? "rgba(255,255,255,0.65)" : "var(--c-t2)",
+                background: yolo ? "rgba(255,255,255,0.03)" : "var(--c-bg3)",
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.06)" : "#1a1a1e"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.03)" : "#151518"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg2)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.03)" : "var(--c-bg3)"; }}
             >
               <svg
                 width="12"
@@ -209,6 +256,10 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               </svg>
               {reasoningInProgress && <div className="aurora-ball" />}
               <span>{reasoningTitle}</span>
+              <div style={{ flex: 1 }} />
+              {message.reasoningContent && !reasoningInProgress && (
+                <CopyBtn text={message.reasoningContent} yolo={yolo} />
+              )}
             </div>
             {reasoningOpen && (
               <div
@@ -216,12 +267,13 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                   padding: "12px",
                   fontSize: "13px",
                   lineHeight: 1.7,
-                  color: yolo ? "rgba(255,255,255,0.5)" : "#8a8a8e",
-                  background: yolo ? "rgba(255,255,255,0.02)" : "#0f0f11",
-                  borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid #2a2a2e",
+                  color: yolo ? "rgba(255,255,255,0.5)" : "var(--c-t6)",
+                  background: yolo ? "rgba(255,255,255,0.02)" : "var(--c-bg2)",
+                  borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid var(--c-bd)",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                   fontStyle: "italic",
+                  userSelect: "text",
                 }}
               >
                 {message.reasoningContent}
@@ -236,17 +288,17 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
           style={{
             fontSize: "14px",
             lineHeight: 1.7,
-            color: "#d4d4d8",
+            color: "var(--c-txt)",
             wordBreak: "break-word",
+            userSelect: "text",
           }}
         >
           {isTool ? (
             <div
               style={{
                 borderRadius: "8px",
-                border: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid #2a2a2e",
+                border: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid var(--c-bd)",
                 overflow: "hidden",
-                ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
               }}
             >
               {/* 工具调用标题栏 — 始终可见 */}
@@ -262,11 +314,11 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                   fontSize: "12px",
                   fontWeight: 600,
                   color: yolo ? "rgba(167,139,250,0.8)" : "#a78bfa",
-                  background: yolo ? "rgba(255,255,255,0.03)" : "#151518",
+                  background: yolo ? "rgba(255,255,255,0.03)" : "var(--c-bg3)",
                   transition: "background 0.12s",
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.06)" : "#1a1a1e"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.03)" : "#151518"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg2)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.03)" : "var(--c-bg3)"; }}
               >
                 <svg
                   width="12"
@@ -284,6 +336,10 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                 </svg>
                 <span>🔧 {message.toolCallId || "Tool"}</span>
                 {isStreaming && <div className="double-helix"><div className="dot" /><div className="dot" /><div className="dot" /><div className="dot" /><div className="dot" /><div className="dot" /><div className="dot" /><div className="dot" /></div>}
+                <div style={{ flex: 1 }} />
+                {(message.content || message.toolCallError) && !isStreaming && (
+                  <CopyBtn text={message.toolCallError || message.content} yolo={yolo} />
+                )}
               </div>
               {/* 工具调用结果 — 可折叠，默认收起 */}
               {toolOpen && (
@@ -295,9 +351,10 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                     lineHeight: 1.6,
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
-                    color: message.toolCallError ? "#ef4444" : yolo ? "rgba(255,255,255,0.55)" : "#a0a0a8",
-                    background: yolo ? "rgba(255,255,255,0.02)" : "#0f0f11",
-                    borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid #2a2a2e",
+                    color: message.toolCallError ? "#ef4444" : yolo ? "rgba(255,255,255,0.55)" : "var(--c-t2)",
+                    background: yolo ? "rgba(255,255,255,0.02)" : "var(--c-bg)",
+                    borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid var(--c-bd)",
+                    userSelect: "text",
                   }}
                 >
                   {isStreaming && !message.content
@@ -307,11 +364,65 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               )}
             </div>
           ) : isUser ? (
-            <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>
-          ) : useMarkdown ? (
-            <MarkdownRenderer content={message.content} />
+            <div>
+              {message.content && <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>}
+              {message.files && message.files.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: message.content ? "8px" : 0 }}>
+                  {message.files.map((file) => (
+                    <div
+                      key={file.id}
+                      onClick={() => onPreviewFile?.(file)}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: "6px",
+                        padding: "5px 10px", borderRadius: "6px",
+                        backgroundColor: yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg2)",
+                        border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid var(--c-bd2)",
+                        cursor: "pointer", userSelect: "none",
+                        transition: "all 0.12s",
+                        maxWidth: "220px",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(59,130,246,0.12)" : "#25252a"; e.currentTarget.style.borderColor = "#3b82f6"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg2)"; e.currentTarget.style.borderColor = yolo ? "rgba(255,255,255,0.1)" : "var(--c-bd2)"; }}
+                    >
+                      {file.isImage ? (
+                        <img src={file.data} alt="" style={{ width: "18px", height: "18px", borderRadius: "3px", objectFit: "cover", flexShrink: 0 }} />
+                      ) : (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0 }}>
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                        </svg>
+                      )}
+                      <span style={{ fontSize: "12px", color: "var(--c-t2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                        {file.name}
+                      </span>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--c-t5)" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0 }}>
+                        <polyline points="15 3 21 3 21 9" />
+                        <polyline points="9 21 3 21 3 15" />
+                        <line x1="21" y1="3" x2="14" y2="10" />
+                      </svg>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {message.content && (
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                  <CopyBtn text={message.content} yolo={yolo} />
+                </div>
+              )}
+            </div>
           ) : (
-            <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>
+            <div>
+              {useMarkdown ? (
+                <MarkdownRenderer content={message.content} yolo={yolo} />
+              ) : (
+                <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>
+              )}
+              {message.content && !isStreaming && (
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                  <CopyBtn text={message.content} yolo={yolo} />
+                </div>
+              )}
+            </div>
           )}
           {isStreaming && !hasReasoning && !isTool && (
             <span className="streaming-cursor">▊</span>
@@ -326,7 +437,6 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               borderRadius: "8px",
               border: yolo ? "1px solid rgba(245,158,11,0.3)" : "1px solid #f59e0b",
               overflow: "hidden",
-              ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
             }}
           >
             <div
@@ -362,17 +472,23 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                 <polyline points="9 18 15 12 9 6" />
               </svg>
               <span>🐞 {t("developerMode")} ({message.toolDebugInfo.length} 次调用)</span>
+              <div style={{ flex: 1 }} />
+              {message.toolDebugInfo && (
+                <CopyBtn text={message.toolDebugInfo.map((e, i) =>
+                  `[第${e.round + 1}轮调用 #${i + 1}] ${e.error ? "失败" : "成功"}${e.durationMs !== undefined ? ` (${e.durationMs}ms)` : ""}\n请求参数:\n${e.rawToolCall}${e.error ? `\n错误:\n${e.error}` : ""}${e.result ? `\n执行结果:\n${e.result}` : ""}`
+                ).join("\n\n")} yolo={yolo} />
+              )}
             </div>
             {devDebugOpen && (
-              <div style={{ padding: "12px", background: yolo ? "rgba(255,255,255,0.02)" : "#0f0f11", borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid #2a2a2e" }}>
+              <div style={{ padding: "12px", background: yolo ? "rgba(255,255,255,0.02)" : "var(--c-bg)", borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid var(--c-bd)" }}>
                 {message.toolDebugInfo.map((entry, i) => (
                   <div key={i} style={{ marginBottom: i < message.toolDebugInfo!.length - 1 ? "16px" : 0 }}>
                     <div style={{ fontSize: "11px", fontWeight: 700, color: "#f59e0b", marginBottom: "8px", lineHeight: 1.6 }}>
-                      ── 第 {entry.round + 1} 轮调用 #{i + 1} ── {entry.error ? <span style={{ color: "#ef4444" }}>失败</span> : <span style={{ color: "#22c55e" }}>成功</span>} {entry.durationMs !== undefined && <span style={{ color: "#a0a0a0" }}>({entry.durationMs}ms)</span>}
+                      ── 第 {entry.round + 1} 轮调用 #{i + 1} ── {entry.error ? <span style={{ color: "#ef4444" }}>失败</span> : <span style={{ color: "#22c55e" }}>成功</span>} {entry.durationMs !== undefined && <span style={{ color: "var(--c-t2)" }}>({entry.durationMs}ms)</span>}
                     </div>
                     <div style={{ marginBottom: "8px" }}>
                       <div style={{ fontSize: "11px", color: "#ffd700", marginBottom: "4px", lineHeight: 1.6 }}>▶ 请求参数</div>
-                      <pre style={{ fontSize: "11px", lineHeight: 1.5, color: "#a0a0a8", background: "#18181b", padding: "8px 10px", borderRadius: "4px", overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "ui-monospace, monospace" }}>{entry.rawToolCall}</pre>
+                      <pre style={{ fontSize: "11px", lineHeight: 1.5, color: "var(--c-t2)", background: "#18181b", padding: "8px 10px", borderRadius: "4px", overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "ui-monospace, monospace" }}>{entry.rawToolCall}</pre>
                     </div>
                     {entry.error && (
                       <div>
@@ -383,7 +499,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                     {entry.result && (
                       <div>
                         <div style={{ fontSize: "11px", color: "#22c55e", marginBottom: "4px", lineHeight: 1.6 }}>▶ 执行结果</div>
-                        <pre style={{ fontSize: "11px", lineHeight: 1.5, color: "#a0a0a8", background: "#18181b", padding: "8px 10px", borderRadius: "4px", overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "ui-monospace, monospace", maxHeight: "200px" }}>{entry.result}</pre>
+                        <pre style={{ fontSize: "11px", lineHeight: 1.5, color: "var(--c-t2)", background: "#18181b", padding: "8px 10px", borderRadius: "4px", overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "ui-monospace, monospace", maxHeight: "200px" }}>{entry.result}</pre>
                       </div>
                     )}
                   </div>

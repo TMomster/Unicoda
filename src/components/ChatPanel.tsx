@@ -15,6 +15,8 @@ interface Props {
   t: (key: string) => string;
   /** Yolo 玻璃模式 — 透明背景 */
   yolo?: boolean;
+  /** 点击文件附件时回调 */
+  onPreviewFile?: (file: import("../types").FileAttachment) => void;
 }
 
 function WelcomeScreen() {
@@ -43,7 +45,7 @@ function WelcomeScreen() {
         style={{
           fontSize: "22px",
           fontWeight: 700,
-          color: "#e0e0e0",
+          color: "var(--c-txt)",
           letterSpacing: "-0.3px",
         }}
       >
@@ -52,7 +54,7 @@ function WelcomeScreen() {
       <p
         style={{
           fontSize: "14px",
-          color: "#6a6a6e",
+          color: "var(--c-t5)",
           textAlign: "center",
           maxWidth: "400px",
           lineHeight: 1.6,
@@ -85,9 +87,9 @@ function Hint({ tag }: { tag: string }) {
       style={{
         padding: "6px 12px",
         borderRadius: "20px",
-        border: "1px solid #2a2a2e",
+        border: "1px solid var(--c-bd)",
         fontSize: "12px",
-        color: "#8a8a8e",
+        color: "var(--c-t6)",
         cursor: "default",
       }}
     >
@@ -106,13 +108,26 @@ export default function ChatPanel({
   developerMode,
   t,
   yolo,
+  onPreviewFile,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const userNearBottomRef = useRef(true);
+
+  // Track scroll position — only auto-scroll if user is near the bottom
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const onScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      userNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 80;
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, []);
 
   useEffect(() => {
-    // 显式滚动容器自身，避免 scrollIntoView 在 transform scale 环境下误滚动父容器
     const container = scrollRef.current;
-    if (container) {
+    if (container && userNearBottomRef.current) {
       container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
     }
   }, [messages]);
@@ -128,7 +143,7 @@ export default function ChatPanel({
       style={{
         flex: 1,
         overflowY: "auto",
-        backgroundColor: yolo ? "transparent" : "#0f0f11",
+        backgroundColor: yolo ? "transparent" : "var(--c-bg)",
         position: "relative",
       }}
     >
@@ -140,7 +155,7 @@ export default function ChatPanel({
         }}
       >
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo={yolo} />
+          <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo={yolo} onPreviewFile={onPreviewFile} />
         ))}
       </div>
     </div>

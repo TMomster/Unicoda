@@ -1,3 +1,15 @@
+export interface FileAttachment {
+  id: string;
+  name: string;
+  size: number;
+  /** MIME 类型 */
+  mimeType: string;
+  /** 文件内容（文本文件）或 Data URL（图片） */
+  data: string;
+  /** 是否为图片文件 */
+  isImage: boolean;
+}
+
 export interface ToolDebugEntry {
   /** 当前工具调用轮次（从 0 开始） */
   round: number;
@@ -29,6 +41,8 @@ export interface Message {
    * 附加在 assistant 消息上，记录该轮次触发的工具调用详情。
    */
   toolDebugInfo?: ToolDebugEntry[];
+  /** 上传的文件附件 */
+  files?: FileAttachment[];
 }
 
 export interface Conversation {
@@ -52,6 +66,8 @@ export interface ModelParams {
   thinkingType?: "enabled" | "disabled";
   /** DeepSeek 推理强度 */
   reasoningEffort?: "high" | "max";
+  /** 允许上传文件 */
+  allowFileUpload?: boolean;
 }
 
 export type Mode = "Chat" | "Agent";

@@ -47,8 +47,8 @@ export default function ConfirmDialog({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          backgroundColor: "#1c1c20",
-          border: "1px solid #3a3a3e",
+          backgroundColor: "var(--c-bg3)",
+          border: "1px solid var(--c-bd2)",
           borderRadius: "12px",
           padding: "24px",
           minWidth: "320px",
@@ -59,10 +59,10 @@ export default function ConfirmDialog({
           gap: "16px",
         }}
       >
-        <div style={{ fontSize: "16px", fontWeight: 600, color: "#e0e0e0" }}>
+        <div style={{ fontSize: "16px", fontWeight: 600, color: "var(--c-txt)" }}>
           {title}
         </div>
-        <div style={{ fontSize: "14px", color: "#a0a0a0", lineHeight: 1.5 }}>
+        <div style={{ fontSize: "14px", color: "var(--c-t2)", lineHeight: 1.5 }}>
           {message}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "4px" }}>
@@ -71,15 +71,15 @@ export default function ConfirmDialog({
             style={{
               padding: "8px 16px",
               borderRadius: "8px",
-              border: "1px solid #3a3a3e",
+              border: "1px solid var(--c-bd2)",
               background: "transparent",
-              color: "#c0c0c0",
+              color: "var(--c-txt)",
               fontSize: "13px",
               cursor: "pointer",
               fontFamily: "inherit",
               transition: "background 0.15s",
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#2a2a2e")}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--c-bd)")}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
           >
             {cancelText}
@@ -91,7 +91,7 @@ export default function ConfirmDialog({
               padding: "8px 16px",
               borderRadius: "8px",
               border: "none",
-              backgroundColor: danger ? "#dc2626" : "#2563eb",
+              backgroundColor: danger ? "#dc2626" : "var(--c-ac)",
               color: "#fff",
               fontSize: "13px",
               fontWeight: 500,
@@ -100,10 +100,10 @@ export default function ConfirmDialog({
               transition: "background 0.15s",
             }}
             onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = danger ? "#b91c1c" : "#1d4ed8")
+              (e.currentTarget.style.backgroundColor = danger ? "#b91c1c" : "var(--c-ah)")
             }
             onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = danger ? "#dc2626" : "#2563eb")
+              (e.currentTarget.style.backgroundColor = danger ? "#dc2626" : "var(--c-ac)")
             }
           >
             {confirmText}

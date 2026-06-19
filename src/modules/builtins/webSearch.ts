@@ -19,6 +19,8 @@
 import type { Module } from "../types";
 import { registerModule } from "../registry";
 import { invoke } from "@tauri-apps/api/core";
+import { readConfigFile } from "../../utils/configStorage";
+import type { SearxngConfig } from "../../contexts/SearchContext";
 
 interface SearchResult {
   title: string;
@@ -459,6 +461,93 @@ function parseBingHtml(html: string, maxResults: number): SearchResult[] {
   return results;
 }
 
+/* ================================================================
+ * SearXNG 搜索后端
+ * ================================================================
+ */
+
+/** 加载 SearXNG 配置（模块直接读取存储，无需 React Context） */
+async function loadSearxngConfig(): Promise<SearxngConfig | null> {
+  try {
+    const config = await readConfigFile<SearxngConfig>(
+      "unison-searxng",
+      { enabled: false, baseUrl: "", categories: "general", language: "zh-CN", safeSearch: 0 },
+    );
+    return config.enabled && config.baseUrl ? config : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 通过 SearXNG JSON API 搜索
+ */
+async function searchSearxng(
+  query: string,
+  count: number,
+  language: string,
+  config: SearxngConfig,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const baseUrl = config.baseUrl.replace(/\/+$/, "");
+  const categories = config.categories || "general,news";
+  const lang = language || config.language || "all";
+
+  const apiUrl = `${baseUrl}/search?q=${encodeURIComponent(query)}&format=json&categories=${encodeURIComponent(categories)}&language=${encodeURIComponent(lang)}&safesearch=${config.safeSearch}&pageno=1`;
+
+  const json = await invoke<string>("http_fetch", {
+    url: apiUrl,
+    userAgent: "Unison/1.0",
+    timeoutMs: 15000,
+    noProxy: true,
+    acceptHeader: "application/json",
+  });
+
+  if (signal?.aborted) return [];
+
+  const parsed = parseSearxngJson(json, count);
+  return parsed;
+}
+
+/**
+ * 解析 SearXNG JSON 搜索结果
+ * SearXNG 返回格式：
+ * {
+ *   "results": [{ "url": "...", "title": "...", "content": "..." }],
+ *   "answers": [],
+ *   "infoboxes": []
+ * }
+ */
+function parseSearxngJson(json: string, maxResults: number): SearchResult[] {
+  try {
+    const data = JSON.parse(json);
+    if (!data.results || !Array.isArray(data.results)) return [];
+
+    const results: SearchResult[] = [];
+    const seenUrls = new Set<string>();
+
+    for (const item of data.results) {
+      if (!item.url || !item.title) continue;
+      if (seenUrls.has(item.url)) continue;
+      seenUrls.add(item.url);
+
+      results.push({
+        title: item.title.replace(/<[^>]+>/g, "").trim(),
+        url: item.url,
+        snippet: (item.content || "").replace(/<[^>]+>/g, "").trim(),
+        source: undefined,
+      });
+
+      if (results.length >= maxResults) break;
+    }
+
+    return results;
+  } catch {
+    // 解析失败的路径
+    return [];
+  }
+}
+
 function formatResults(results: SearchResult[]): string {
   if (results.length === 0) return "未找到相关搜索结果。";
 
@@ -525,9 +614,21 @@ const mod: Module = {
       ? params.excludeSites.split(",").map((s) => s.trim()).filter(Boolean)
       : undefined;
 
+    // 检查 SearXNG 配置，启用时优先使用
+    const searxngConfig = await loadSearxngConfig();
+
     try {
-      const results = await searchBing(query, count, language, excludeSites, signal);
-      yield formatResults(results);
+      if (searxngConfig) {
+        yield `[搜索引擎：SearXNG - ${searxngConfig.baseUrl}]\n`;
+        const queryString = hasCJK(query)
+          ? rewriteQuery(query).chineseQuery
+          : query;
+        const results = await searchSearxng(queryString, count, language, searxngConfig, signal);
+        yield formatResults(results);
+      } else {
+        const results = await searchBing(query, count, language, excludeSites, signal);
+        yield formatResults(results);
+      }
     } catch (err) {
       yield `搜索失败: ${err instanceof Error ? err.message : String(err)}`;
     }

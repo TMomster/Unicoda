@@ -1,9 +1,12 @@
 /**
- * 预装填知识库服务
+ * 知识库服务
  *
- * 提供预设的知识条目，在 Agent 模式下注入到系统提示词中，
- * 让模型了解自身平台信息、当前项目上下文等。
+ * 提供预设的知识条目 + 用户自定义知识卡管理。
+ * 内置条目只读（仅展示标题），用户知识卡支持 CRUD。
+ * 在 Agent 模式下知识库会注入到系统提示词中。
  */
+
+import { writeConfigFile } from "../utils/configStorage";
 
 export interface KnowledgeEntry {
   id: string;
@@ -12,14 +15,19 @@ export interface KnowledgeEntry {
   enabled: boolean;
   /** 标签分类 */
   category: "platform" | "reference";
+  /** 是否为内置条目（内置不可编辑/删除） */
+  builtin: boolean;
 }
 
-const knowledgeStore: KnowledgeEntry[] = [
+const USER_CARDS_KEY = "unison-user-knowledge-cards";
+
+const builtinEntries: KnowledgeEntry[] = [
   {
     id: "kb-unison-intro",
     title: "Unison 平台简介",
     category: "platform",
     enabled: true,
+    builtin: true,
     content: `Unison 是一个模块化 AI 助手桌面应用，基于 Tauri v2 + React 构建。
 核心能力包括：
 - 文件读写：支持在项目目录中读取和写入文件
@@ -33,6 +41,7 @@ const knowledgeStore: KnowledgeEntry[] = [
     title: "当前时区与日期",
     category: "reference",
     enabled: true,
+    builtin: true,
     content: `当前北京时间 (CST, UTC+8)：${new Date().toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}
 当前 UTC 时间：${new Date().toUTCString()}
 今天的日期：${new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}`,
@@ -42,6 +51,7 @@ const knowledgeStore: KnowledgeEntry[] = [
     title: "常用技术参考",
     category: "reference",
     enabled: true,
+    builtin: true,
     content: `- TypeScript 版本：5.x
 - React 版本：18.x
 - Node.js 版本：22.x
@@ -54,6 +64,7 @@ const knowledgeStore: KnowledgeEntry[] = [
     title: "模组系统概览",
     category: "platform",
     enabled: true,
+    builtin: true,
     content: `Unison 的模组（Module）系统提供了 4 个预置功能扩展，可通过 <tool_call> 标记调用：
 
 1. get_current_time（获取当前时间）
@@ -95,20 +106,65 @@ const knowledgeStore: KnowledgeEntry[] = [
   },
 ];
 
-/** 获取所有已启用的知识条目 */
-export function getEnabledKnowledgeEntries(): KnowledgeEntry[] {
-  return knowledgeStore.filter((e) => e.enabled);
+/** 获取所有知识条目（内置 + 用户自定义） */
+export function getAllKnowledgeEntries(): KnowledgeEntry[] {
+  const userCards = getUserCards();
+  return [...builtinEntries, ...userCards];
 }
 
-/** 获取所有知识条目（含已禁用的） */
-export function getAllKnowledgeEntries(): KnowledgeEntry[] {
-  return [...knowledgeStore];
+/** 获取所有已启用的知识条目 */
+export function getEnabledKnowledgeEntries(): KnowledgeEntry[] {
+  return getAllKnowledgeEntries().filter((e) => e.enabled);
 }
 
 /** 切换知识条目的启用状态 */
 export function toggleKnowledgeEntry(id: string): void {
-  const entry = knowledgeStore.find((e) => e.id === id);
-  if (entry) entry.enabled = !entry.enabled;
+  const entry = [...builtinEntries, ...getUserCards()].find((e) => e.id === id);
+  if (entry && !entry.builtin) {
+    // 用户卡片切换后持久化
+    const cards = getUserCards();
+    const idx = cards.findIndex((c) => c.id === id);
+    if (idx !== -1) {
+      cards[idx].enabled = !cards[idx].enabled;
+      saveUserCards(cards);
+    }
+  }
+}
+
+/** 添加用户知识卡 */
+export function addUserKnowledgeCard(title: string, content: string): KnowledgeEntry {
+  const cards = getUserCards();
+  const newCard: KnowledgeEntry = {
+    id: `usr-kb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    title,
+    content,
+    enabled: true,
+    category: "reference",
+    builtin: false,
+  };
+  cards.push(newCard);
+  saveUserCards(cards);
+  return newCard;
+}
+
+/** 更新用户知识卡 */
+export function updateUserKnowledgeCard(id: string, title: string, content: string): boolean {
+  const cards = getUserCards();
+  const idx = cards.findIndex((c) => c.id === id);
+  if (idx === -1) return false;
+  cards[idx].title = title;
+  cards[idx].content = content;
+  saveUserCards(cards);
+  return true;
+}
+
+/** 删除用户知识卡 */
+export function deleteUserKnowledgeCard(id: string): boolean {
+  const cards = getUserCards();
+  const filtered = cards.filter((c) => c.id !== id);
+  if (filtered.length === cards.length) return false;
+  saveUserCards(filtered);
+  return true;
 }
 
 /** 将知识库格式化为系统提示词片段 */
@@ -125,4 +181,33 @@ export function formatKnowledgeForPrompt(): string {
       )
       .join("\n\n")
   );
+}
+
+// ── 用户卡片持久化 ──
+
+function getUserCards(): KnowledgeEntry[] {
+  try {
+    const raw = localStorage.getItem(USER_CARDS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((c: Record<string, unknown>) => ({
+          id: String(c.id ?? ""),
+          title: String(c.title ?? ""),
+          content: String(c.content ?? ""),
+          enabled: Boolean(c.enabled ?? true),
+          category: (c.category === "platform" ? "platform" : "reference") as "platform" | "reference",
+          builtin: false,
+        }));
+      }
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function saveUserCards(cards: KnowledgeEntry[]): void {
+  try {
+    localStorage.setItem(USER_CARDS_KEY, JSON.stringify(cards));
+  } catch { /* ignore */ }
+  writeConfigFile(USER_CARDS_KEY, cards);
 }

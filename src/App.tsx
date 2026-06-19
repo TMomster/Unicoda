@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { Conversation, Message, Mode, PanelMode } from "./types";
+import type { Conversation, FileAttachment, Message, Mode, PanelMode } from "./types";
 import { useTheme, scaleToTransform } from "./contexts/ThemeContext";
 import { useModels } from "./contexts/ModelContext";
 import { ModelProvider } from "./contexts/ModelContext";
 import { LockProvider } from "./contexts/LockContext";
+import { SearchProvider } from "./contexts/SearchContext";
 import { streamChatCompletion } from "./services/modelApi";
 import { writeConfigFile, readConfigFile } from "./utils/configStorage";
 import { initBuiltinModules } from "./modules/registry";
@@ -17,14 +18,17 @@ import {
   compressConversation,
   MIN_MESSAGES_FOR_COMPRESSION,
 } from "./services/conversationCompression";
+import { useLock } from "./contexts/LockContext";
 import LockOverlay from "./components/LockOverlay";
 import Sidebar from "./components/Sidebar";
 import ChatPanel from "./components/ChatPanel";
 import InputBar from "./components/InputBar";
 import TitleBar from "./components/TitleBar";
 import SettingsPanel from "./components/SettingsPanel";
-import ModulesPanel from "./components/ModulesPanel";
+import ComponentsPanel from "./components/ComponentsPanel";
 import YoloPanel from "./components/YoloPanel";
+import PrintDialog from "./components/PrintDialog";
+import FilePreviewPanel from "./components/FilePreviewPanel";
 
 /** 将当前会话列表写入文件（仅流式完成后调用） */
 function flushConversations(convs: Conversation[], path: string) {
@@ -54,7 +58,7 @@ function makeConvTitle(existing: Conversation[], locale: string): string {
 
 // ─── Inner component that has access to ModelProvider context ──────
 function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPanelMode: React.Dispatch<React.SetStateAction<PanelMode>> }) {
-  const { scale, fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode } = useTheme();
+  const { scale, fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode, theme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     try {
@@ -264,8 +268,24 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   );
 
   // ── Module system integration ──────────────────────────────
-  const [modulesOpen, setModulesOpen] = useState(false);
+  const [componentsOpen, setComponentsOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState<FileAttachment | null>(null);
   const [mode, setMode] = useState<Mode>("Chat");
+
+  // ── Toast notification ──────────────────────────────
+  const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, key: Date.now() });
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  const { isLocked } = useLock();
   useEffect(() => {
     initBuiltinModules();
   }, []);
@@ -318,7 +338,13 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         result.push({ role: m.role, content: m.content });
       }
     }
-    result.push({ role: userMsg.role, content: userMsg.content });
+    // 合并文件内容到用户消息
+    let finalContent = userMsg.content;
+    if (userMsg.files && userMsg.files.length > 0) {
+      const fileBlocks = userMsg.files.map((f) => `[文件: ${f.name}]\n${f.data}`);
+      finalContent = fileBlocks.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
+    }
+    result.push({ role: userMsg.role, content: finalContent });
     return result;
   }
 
@@ -366,6 +392,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
       let fullContent = "";
       let fullReasoning = "";
+      let reasoningEnded = false;
 
       const apiMessages = [...initialApiMessages, ...allToolResults];
 
@@ -376,11 +403,15 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
       )) {
         fullContent += chunk.content;
         fullReasoning += chunk.reasoningContent;
+        // 检测思考阶段结束：有 reasoning 积累后首次收到内容片段
+        if (!reasoningEnded && fullReasoning && chunk.content) {
+          reasoningEnded = true;
+        }
         updateConv(activeId, (c) => ({
           ...c,
           messages: c.messages.map((msg) =>
             msg.id === assistantId
-              ? { ...msg, content: fullContent, reasoningContent: fullReasoning }
+              ? { ...msg, content: fullContent, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) }
               : msg,
           ),
           updatedAt: Date.now(),
@@ -553,6 +584,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
       let fullContent = "";
       let fullReasoning = "";
+      let reasoningEnded = false;
 
       const apiMessages = [...initialApiMessages, ...allToolResults];
 
@@ -563,11 +595,15 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
       )) {
         fullContent += chunk.content;
         fullReasoning += chunk.reasoningContent;
+        // 检测思考阶段结束：有 reasoning 积累后首次收到内容片段
+        if (!reasoningEnded && fullReasoning && chunk.content) {
+          reasoningEnded = true;
+        }
         updateConv(activeId, (c) => ({
           ...c,
           messages: c.messages.map((msg) =>
             msg.id === assistantId
-              ? { ...msg, content: fullContent, reasoningContent: fullReasoning }
+              ? { ...msg, content: fullContent, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) }
               : msg,
           ),
           updatedAt: Date.now(),
@@ -688,7 +724,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   }
 
   const handleSend = useCallback(
-    async (text: string, sendMode?: Mode) => {
+    async (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
       if (!activeId || !selectedModel) return;
       const currentMode = sendMode ?? mode;
 
@@ -702,6 +738,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         role: "user",
         content: text,
         timestamp: Date.now(),
+        files,
       };
 
       const currentConv = conversations.find((c) => c.id === activeId);
@@ -782,6 +819,14 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
   const activeConv = conversations.find((c) => c.id === activeId) ?? null;
 
+  const handlePrint = useCallback(() => {
+    if (!activeConv) {
+      showToast("请先开始一个会话");
+      return;
+    }
+    setPrintOpen(true);
+  }, [activeConv, showToast]);
+
   const handleToggleCompression = useCallback(() => {
     setCompressionEnabled((v) => !v);
   }, []);
@@ -809,6 +854,75 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     }
   }, [activeConv, activeId, selectedModel, updateConv, isCompressing]);
 
+  // ── Ctrl+P Print Dialog (with context guards + toast) ──
+  const printGuardRef = useRef({ isLocked: false, panelMode: "Default" as PanelMode, settingsOpen: false, componentsOpen: false, hasActiveConv: false });
+  printGuardRef.current = { isLocked, panelMode, settingsOpen, componentsOpen, hasActiveConv: activeConv !== null };
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        e.preventDefault();
+        const g = printGuardRef.current;
+        if (g.isLocked) {
+          showToast("Unison 已锁定，请先解锁");
+        } else if (g.panelMode === "Yolo") {
+          showToast("Yolo 窗口不支持打印");
+        } else if (g.settingsOpen) {
+          showToast("设置界面不支持打印");
+        } else if (g.componentsOpen) {
+          showToast("组件管理界面不支持打印");
+        } else if (!g.hasActiveConv) {
+          showToast("请先开始一个会话");
+        } else {
+          setPrintOpen((prev) => !prev);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showToast]);
+
+  // ── 全局拦截浏览器默认按键/右键（捕获阶段） ──
+  useEffect(() => {
+    // 浏览器快捷键黑名单（Ctrl+key / Cmd+key）
+    const blockedCtrl: string[] = ["t", "w", "n", "r", "s", "u", "h", "j", "d", "o", "F5", "F11"];
+    // Ctrl+Shift 组合黑名单
+    const blockedShiftCtrl: string[] = ["i", "j", "c", "n"];
+    // F1-F12 全部拦截（开发工具、帮助等）
+    const blockedFKeys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 拦截 F-键
+      const fNum = parseInt(e.key.slice(1), 10);
+      if (e.key.startsWith("F") && !isNaN(fNum) && blockedFKeys.includes(fNum)) {
+        e.preventDefault();
+        return;
+      }
+      // 拦截 Ctrl/Meta 浏览器快捷键
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase();
+        if (blockedCtrl.includes(key)) {
+          e.preventDefault();
+          return;
+        }
+        if (e.shiftKey && blockedShiftCtrl.includes(key)) {
+          e.preventDefault();
+          return;
+        }
+      }
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault(); // 阻止浏览器右键菜单
+    };
+
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    document.addEventListener("contextmenu", handleContextMenu, { capture: true });
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+      document.removeEventListener("contextmenu", handleContextMenu, { capture: true });
+    };
+  }, []);
+
   const transformScale = scaleToTransform(scale);
 
   // ── Blur transition derived values ─────────────
@@ -819,6 +933,26 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     ? (panelMode === "Yolo" ? 1 : 0)
     : (panelMode === "Yolo" && transitionPhase !== "fade" ? 1 : 0);
   const blurOpacity = isTransitioning && transitionPhase !== "reveal" ? 1 : 0;
+
+  // Inject comprehensive CSS color tokens (dark = default, light overrides via [data-theme="light"])
+  const themeStyleTag = (
+    <style>{`
+      [data-theme] {
+        --c-bg: #0f0f11;   --c-bg2: #1a1a1e;   --c-bg3: #1e1e22;
+        --c-txt: #e0e0e0;  --c-t2: #a0a0a0;     --c-t3: #7a7a7e;
+        --c-t4: #5a5a5e;   --c-t5: #6a6a6e;     --c-t6: #8a8a8e;
+        --c-bd: #2a2a2e;   --c-bd2: #3a3a3e;
+        --c-ac: #2563eb;   --c-ah: #1d4ed8;     --c-bf: #2563eb;
+      }
+      [data-theme="light"] {
+        --c-bg: #f2f2f5;   --c-bg2: #ffffff;    --c-bg3: #e8e8ec;
+        --c-txt: #1a1a1e;  --c-t2: #5a5a5e;     --c-t3: #8a8a8e;
+        --c-t4: #9a9a9e;   --c-t5: #7a7a7e;     --c-t6: #a0a0a0;
+        --c-bd: #d4d4d8;   --c-bd2: #c8c8cc;
+        --c-ac: #2563eb;   --c-ah: #1d4ed8;     --c-bf: #2563eb;
+      }
+    `}</style>
+  );
 
   // Inject entrance keyframes for YoloPanel staggered animation
   const entranceStyleTag = (
@@ -844,6 +978,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
   return (
     <div
+      data-theme={panelMode === "Yolo" ? "dark" : theme}
       style={{
         width: `${100 / transformScale}vw`,
         height: `${100 / transformScale}vh`,
@@ -851,13 +986,15 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         transformOrigin: "top left",
         display: "flex",
         flexDirection: "column",
-        backgroundColor: "#0f0f11",
-        color: "#e0e0e0",
+        backgroundColor: "var(--c-bg)",
+        color: "var(--c-txt)",
         fontFamily,
         position: "relative",
         overflow: "hidden",
+        userSelect: "none",
       }}
     >
+      {themeStyleTag}
       {entranceStyleTag}
       {/* ── Default UI (opacity controlled for transitions) ── */}
       <div style={{
@@ -888,8 +1025,9 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
             onResize={handleResizeSidebar}
             onOpenSettings={() => setSettingsOpen(true)}
-            onOpenModules={() => setModulesOpen(true)}
+            onOpenComponents={() => setComponentsOpen(true)}
             onTogglePanel={handleTogglePanel}
+            onPrint={handlePrint}
           />
 
           {/* Main Area */}
@@ -913,7 +1051,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             >
               {/* Messages */}
               {activeConv ? (
-                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} />
+                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} />
               ) : (
                 <div
                   style={{
@@ -921,7 +1059,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "#6a6a6e",
+                    color: "var(--c-t5)",
                     fontSize: "14px",
                   }}
                 >
@@ -948,8 +1086,10 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             </div>
           </div>
 
-          {/* ── Settings Overlay (covers entire window) ── */}
-          {settingsOpen && (
+          {settingsOpen && <SettingsPanel onBack={() => setSettingsOpen(false)} />}
+
+          {/* ── Components Overlay ── */}
+          {componentsOpen && (
             <div
               style={{
                 position: "absolute",
@@ -957,36 +1097,27 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
                 zIndex: 200,
                 display: "flex",
                 flexDirection: "column",
-                backgroundColor: "#0f0f11",
+                backgroundColor: "var(--c-bg)",
                 animation: "fadeIn 0.2s ease",
               }}
             >
-              <style>{`
-                @keyframes fadeIn {
-                  from { opacity: 0; }
-                  to { opacity: 1; }
-                }
-              `}</style>
-              <SettingsPanel onBack={() => setSettingsOpen(false)} />
+              <ComponentsPanel onBack={() => setComponentsOpen(false)} />
             </div>
           )}
 
-          {/* ── Modules/KB Overlay ── */}
-          {modulesOpen && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                zIndex: 200,
-                display: "flex",
-                flexDirection: "column",
-                backgroundColor: "#0f0f11",
-                animation: "fadeIn 0.2s ease",
-              }}
-            >
-              <ModulesPanel onBack={() => setModulesOpen(false)} />
-            </div>
+          {/* ── Print Dialog Overlay ── */}
+          {printOpen && activeConv && (
+            <PrintDialog
+              messages={activeConv.messages}
+              modelName={selectedModel?.name}
+              userName={userName}
+              t={t}
+              onClose={() => setPrintOpen(false)}
+            />
           )}
+
+          {/* ── File Preview Panel ── */}
+          <FilePreviewPanel file={previewFile} onClose={() => setPreviewFile(null)} />
         </div>
       </div>
 
@@ -1010,19 +1141,71 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         transition: "opacity 0.3s ease",
         pointerEvents: "none",
       }} />
+
+      {/* ── Toast notification ── */}
+      <style>{`
+        @keyframes toast-in {
+          from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
+      {toast && (
+        <div key={toast.key} style={{
+          position: "fixed", bottom: "80px", left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 100000,
+          backgroundColor: "var(--c-bg2)",
+          border: "1px solid var(--c-bd)",
+          color: "var(--c-txt)",
+          padding: "10px 22px",
+          borderRadius: "8px",
+          fontSize: "13px",
+          fontWeight: 500,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          animation: "toast-in 0.2s ease",
+          pointerEvents: "none",
+          userSelect: "none",
+          whiteSpace: "nowrap",
+        }}>
+          {toast.message}
+        </div>
+      )}
+
+      {/* ── Lock overlay (inside data-theme root so --c-bg resolves) ── */}
+      <LockOverlay locale={locale} yolo={panelMode === "Yolo"} />
+
     </div>
   );
 }
 
 // ─── Root component — providers wrap the inner content ────────────
 export default function App() {
-  const { locale } = useTheme();
   const [panelMode, setPanelMode] = useState<PanelMode>("Default");
   return (
     <LockProvider>
     <ModelProvider>
+    <SearchProvider>
       <MainContent panelMode={panelMode} setPanelMode={setPanelMode} />
-      <LockOverlay locale={locale} yolo={panelMode === "Yolo"} />
+
+      {/* ── 版本标记（全局顶层，取反色） ── */}
+      <span
+        style={{
+          position: "fixed",
+          bottom: "10px",
+          right: "14px",
+          fontSize: "11px",
+          color: "#fff",
+          mixBlendMode: "difference",
+          pointerEvents: "none",
+          userSelect: "none",
+          whiteSpace: "nowrap",
+          fontFamily: "inherit",
+          zIndex: 99999,
+        }}
+      >
+        [Alpha测试] 此版本不代表最终品质
+      </span>
+    </SearchProvider>
     </ModelProvider>
     </LockProvider>
   );

@@ -8,6 +8,8 @@ interface FontOption {
   label: string;
 }
 
+export type ThemeMode = "dark" | "light";
+
 interface ThemeContextType {
   scale: number;
   fontFamily: string;
@@ -21,6 +23,7 @@ interface ThemeContextType {
   defaultMarkdown: boolean;
   defaultReasoningOpen: boolean;
   developerMode: boolean;
+  theme: ThemeMode;
   setScale: (s: number) => void;
   setSelectedFont: (fontName: string) => void;
   setLocale: (locale: Locale) => void;
@@ -30,6 +33,7 @@ interface ThemeContextType {
   setDefaultMarkdown: (v: boolean) => void;
   setDefaultReasoningOpen: (v: boolean) => void;
   setDeveloperMode: (v: boolean) => void;
+  setTheme: (v: ThemeMode) => void;
   resetSettings: () => void;
 }
 
@@ -60,10 +64,10 @@ function buildFontFamily(primary: string): string {
 // 缩放基准：70% 作为 100% 标准
 const BASELINE_SCALE = 0.70;
 
-interface SavedSettings { scale: number; fontName: string; locale: Locale; sessionPath: string; userName: string; userAvatar: string; defaultMarkdown: boolean; defaultReasoningOpen: boolean; developerMode: boolean; }
+interface SavedSettings { scale: number; fontName: string; locale: Locale; sessionPath: string; userName: string; userAvatar: string; defaultMarkdown: boolean; defaultReasoningOpen: boolean; developerMode: boolean; theme: ThemeMode; }
 
 /** 外观/行为默认值（resetSettings 会回到这些值，不含隐私和模型配置） */
-const DEFAULT_SETTINGS: SavedSettings = { scale: 100, fontName: FONT_OPTIONS[0].name, locale: "en-US" as Locale, sessionPath: "", userName: "用户", userAvatar: "", defaultMarkdown: true, defaultReasoningOpen: true, developerMode: false };
+const DEFAULT_SETTINGS: SavedSettings = { scale: 100, fontName: FONT_OPTIONS[0].name, locale: "en-US" as Locale, sessionPath: "", userName: "用户", userAvatar: "", defaultMarkdown: true, defaultReasoningOpen: true, developerMode: false, theme: "dark" };
 
 function loadSettingsSync(): SavedSettings {
   try {
@@ -85,6 +89,7 @@ function loadSettingsSync(): SavedSettings {
         defaultMarkdown: s.defaultMarkdown ?? true,
         defaultReasoningOpen: s.defaultReasoningOpen ?? true,
         developerMode: s.developerMode ?? false,
+        theme: s.theme ?? "dark",
       };
     }
   } catch {}
@@ -175,6 +180,27 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setTheme = useCallback((v: ThemeMode) => {
+    const root = document.documentElement;
+    // Add transition class immediately so browser registers it
+    root.classList.add('theme-transition');
+    // Double rAF: defer theme change to the NEXT frame,
+    // ensuring the class is painted before CSS variables change
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setSettings((prev) => {
+          const next = { ...prev, theme: v };
+          writeConfigFile(STORAGE_KEY, next);
+          return next;
+        });
+        // Remove class after animation completes
+        setTimeout(() => {
+          root.classList.remove('theme-transition');
+        }, 650);
+      });
+    });
+  }, []);
+
   /** 重置外观/行为配置（不含隐私和模型） */
   const resetSettings = useCallback(() => {
     setSettings((prev) => {
@@ -209,6 +235,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       defaultMarkdown: settings.defaultMarkdown,
       defaultReasoningOpen: settings.defaultReasoningOpen,
       developerMode: settings.developerMode,
+      theme: settings.theme,
       setScale,
       setSelectedFont,
       setLocale,
@@ -218,9 +245,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setDefaultMarkdown,
       setDefaultReasoningOpen,
       setDeveloperMode,
+      setTheme,
       resetSettings,
     }),
-    [settings, fontFamily, translate, setScale, setSelectedFont, setLocale, setSessionPath, setUserName, setUserAvatar, setDefaultMarkdown, setDefaultReasoningOpen, setDeveloperMode, resetSettings],
+    [settings, fontFamily, translate, setScale, setSelectedFont, setLocale, setSessionPath, setUserName, setUserAvatar, setDefaultMarkdown, setDefaultReasoningOpen, setDeveloperMode, setTheme, resetSettings],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

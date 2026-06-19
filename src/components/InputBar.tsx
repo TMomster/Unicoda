@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useModels } from "../contexts/ModelContext";
-import type { Message, Mode } from "../types";
+import type { FileAttachment, Message, Mode } from "../types";
+import { fileToAttachment } from "../utils/fileParser";
 import { hasCompressionSummary, MIN_MESSAGES_FOR_COMPRESSION } from "../services/conversationCompression";
 
 const styles = document.createElement("style");
@@ -62,10 +63,39 @@ styles.textContent = `
   .yolo-input-area::placeholder {
     color: rgba(255,255,255,0.25) !important;
   }
+  @keyframes input-glow {
+    0%, 100% { box-shadow: 0 0 8px rgba(59,130,246,0.35), 0 0 20px rgba(99,102,241,0.15); }
+    25%      { box-shadow: 0 0 8px rgba(168,85,247,0.35), 0 0 20px rgba(168,85,247,0.15); }
+    50%      { box-shadow: 0 0 8px rgba(236,72,153,0.35), 0 0 20px rgba(236,72,153,0.15); }
+    75%      { box-shadow: 0 0 8px rgba(59,130,246,0.35), 0 0 20px rgba(99,102,241,0.15); }
+  }
+  @keyframes yolo-input-glow {
+    0%, 100% { box-shadow: 0 0 12px rgba(59,130,246,0.25), 0 0 30px rgba(99,102,241,0.10); border-color: rgba(59,130,246,0.25); }
+    25%      { box-shadow: 0 0 12px rgba(168,85,247,0.25), 0 0 30px rgba(168,85,247,0.10); border-color: rgba(168,85,247,0.25); }
+    50%      { box-shadow: 0 0 12px rgba(236,72,153,0.25), 0 0 30px rgba(236,72,153,0.10); border-color: rgba(236,72,153,0.25); }
+    75%      { box-shadow: 0 0 12px rgba(59,130,246,0.25), 0 0 30px rgba(99,102,241,0.10); border-color: rgba(59,130,246,0.25); }
+  }
 `;
 document.head.appendChild(styles);
 
 const MODES = ["Chat", "Agent", "Yolo"] as const;
+
+// ── Mode icons (SVG paths) ──────────────────────────
+const ModeIcon = ({ mode, size = 14 }: { mode: string; size?: number }) => {
+  const s = size;
+  if (mode === "Chat") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>;
+  if (mode === "Agent") return <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="5" width="16" height="14" rx="3" /><circle cx="9" cy="10" r="1.5" fill="currentColor" /><circle cx="15" cy="10" r="1.5" fill="currentColor" /><path d="M9 15c0.5 1 1.5 1.5 3 1.5s2.5-0.5 3-1.5" /></svg>;
+  return <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>;
+};
+
+/** 压缩图标：两侧箭头向中心聚拢 */
+const CompressIcon = ({ size = 14, active = false }: { size?: number; active?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="17 8 21 12 17 16" />
+    <polyline points="7 8 3 12 7 16" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+  </svg>
+);
 
 /**
  * 粗略估算 token 数量：中文 ~1.5 字符/token，英文 ~4 字符/token
@@ -102,7 +132,7 @@ function usageColor(pct: number): string {
 }
 
 interface Props {
-  onSend: (text: string, mode?: Mode) => void;
+  onSend: (text: string, mode?: Mode, files?: FileAttachment[]) => void;
   onStop: () => void;
   disabled: boolean;
   /** 上下文容量 + 压缩控制 */
@@ -129,47 +159,91 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
   const [expanded, setExpanded] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [closing, setClosing] = useState(false);
+  const [modeClosing, setModeClosing] = useState(false);
+  const [modelClosing, setModelClosing] = useState(false);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setNarrow(entry.contentRect.width < 300);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const modelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [candidateFiles, setCandidateFiles] = useState<FileAttachment[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
 
   const startClose = () => {
     if (!modeOpen && !modelOpen) return;
-    setClosing(true);
-    closeTimerRef.current = setTimeout(() => {
-      setModeOpen(false);
-      setModelOpen(false);
-      setClosing(false);
-    }, 180);
+    if (modeOpen) {
+      setModeClosing(true);
+      closeTimerRef.current = setTimeout(() => {
+        setModeOpen(false);
+        setModeClosing(false);
+      }, 180);
+    }
+    if (modelOpen) {
+      setModelClosing(true);
+      modelCloseTimerRef.current = setTimeout(() => {
+        setModelOpen(false);
+        setModelClosing(false);
+      }, 180);
+    }
   };
 
-  // Cleanup timer on unmount
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      if (modelCloseTimerRef.current) clearTimeout(modelCloseTimerRef.current);
     };
   }, []);
 
-  // Auto-resize textarea
+  // Auto-resize textarea with smooth expand/collapse animation
   useEffect(() => {
     const el = textareaRef.current;
-    if (el) {
-      el.style.height = "auto";
-      if (expanded) {
-        const halfH = Math.floor(window.innerHeight / 2);
-        el.style.height = Math.max(el.scrollHeight, halfH) + "px";
-      } else {
-        el.style.height = Math.min(el.scrollHeight, MAX_NORMAL_HEIGHT) + "px";
-      }
+    if (!el) return;
+
+    // Temporarily remove transition to snap to content height as baseline
+    const prevTransition = el.style.transition;
+    el.style.transition = "none";
+    const prevHeight = el.offsetHeight; // must read before setting "auto"
+    el.style.height = "auto";
+    const contentHeight = el.scrollHeight;
+
+    const targetHeight = expanded
+      ? Math.max(contentHeight, Math.floor(window.innerHeight / 2))
+      : Math.min(contentHeight, MAX_NORMAL_HEIGHT);
+
+    // If height hasn't changed, nothing to animate
+    if (Math.abs(prevHeight - targetHeight) < 1) {
+      el.style.height = targetHeight + "px";
+      el.style.transition = prevTransition;
+      return;
     }
+
+    // Snap back to previous height (transition off), then animate to target
+    el.style.height = prevHeight + "px";
+    el.offsetHeight; // force reflow
+    el.style.transition = prevTransition || "";
+    el.style.height = targetHeight + "px";
   }, [text, expanded]);
 
   const handleSend = () => {
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed, mode);
+    if ((!trimmed && candidateFiles.length === 0) || disabled) return;
+    onSend(trimmed, mode, candidateFiles.length > 0 ? candidateFiles : undefined);
     setText("");
     setExpanded(false);
+    setCandidateFiles([]);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -195,11 +269,82 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
     }
   };
 
+  // ── 文件读取与拖拽上传 ──────────────────────────
+  const selectedModel_ = models.find((m) => m.id === selectedModelId);
+  const modelAllowsFileUpload = !!selectedModel_?.params?.allowFileUpload;
+
+  const addFilesToCandidates = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    const allowed: FileAttachment[] = [];
+    for (const file of fileArray) {
+      // 跳过图片文件
+      if (file.type.startsWith("image/")) continue;
+      if (!modelAllowsFileUpload) continue;
+      // 限制 10MB 大小
+      if (file.size > 10 * 1024 * 1024) continue;
+      try {
+        const attachment = await fileToAttachment(file);
+        allowed.push(attachment);
+      } catch { /* skip failed reads */ }
+    }
+    if (allowed.length > 0) {
+      setCandidateFiles((prev) => [...prev, ...allowed]);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (dragCounterRef.current === 1) {
+      setDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setDragOver(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    dragCounterRef.current = 0;
+    if (disabled) return;
+    if (!modelAllowsFileUpload) return;
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      addFilesToCandidates(e.dataTransfer.files);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      addFilesToCandidates(e.target.files);
+      e.target.value = ""; // 允许重复选择相同文件
+    }
+  };
+
+  const removeCandidateFile = (fileId: string) => {
+    setCandidateFiles((prev) => prev.filter((f) => f.id !== fileId));
+  };
+
   const closeAll = () => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    if (modelCloseTimerRef.current) clearTimeout(modelCloseTimerRef.current);
     setModeOpen(false);
     setModelOpen(false);
-    setClosing(false);
+    setModeClosing(false);
+    setModelClosing(false);
   };
 
   const selectedModel = models.find((m) => m.id === selectedModelId);
@@ -216,11 +361,21 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
 
   return (
     <div
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
       style={{
-        backgroundColor: yolo ? "transparent" : "#0f0f11",
+        backgroundColor: yolo ? "transparent" : "var(--c-bg)",
         padding: "0 16px 5px",
+        position: "relative",
       }}
     >
+      {/* 隐藏的文件输入 */}
+      <input ref={fileInputRef} type="file" multiple
+        onChange={handleFileInputChange}
+        style={{ display: "none" }}
+        accept={modelAllowsFileUpload ? "*/*" : undefined} />
       <div
         style={{
           maxWidth: "720px",
@@ -228,16 +383,92 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
           position: "relative",
         }}
       >
+        {/* 拖拽遮罩层 */}
+        {dragOver && (
+          <div
+            style={{
+              position: "absolute", inset: 0, zIndex: 50,
+              borderRadius: "14px",
+              border: "2px dashed #3b82f6",
+              backgroundColor: yolo ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.06)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: "14px", color: "#60a5fa", fontWeight: 600,
+              backdropFilter: yolo ? "blur(4px)" : undefined,
+              WebkitBackdropFilter: yolo ? "blur(4px)" : undefined,
+              pointerEvents: "none",
+            }}
+          >
+            {modelAllowsFileUpload ? "释放文件以上传" : "当前模型未启用文件上传"}
+          </div>
+        )}
+
+        {/* 文件候选区 */}
+        {candidateFiles.length > 0 && (
+          <div
+            style={{
+              display: "flex", flexWrap: "wrap", gap: "6px",
+              marginBottom: "8px", padding: "4px 0",
+            }}
+          >
+            {candidateFiles.map((file) => (
+              <div
+                key={file.id}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "4px",
+                  padding: "4px 8px", borderRadius: "6px",
+                  backgroundColor: yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg3)",
+                  border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid var(--c-bd2)",
+                  fontSize: "12px", color: "var(--c-t2)", maxWidth: "200px",
+                }}
+                title={file.name}
+              >
+                {file.isImage ? (
+                  <img src={file.data} alt="" style={{ width: "16px", height: "16px", borderRadius: "2px", objectFit: "cover", flexShrink: 0 }} />
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0, color: "#60a5fa" }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                )}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                  {file.name}
+                </span>
+                <button
+                  onClick={() => removeCandidateFile(file.id)}
+                  title="移除"
+                  style={{
+                    width: "16px", height: "16px", borderRadius: "3px",
+                    border: "none", background: "transparent",
+                    color: "var(--c-t5)", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    padding: 0, flexShrink: 0,
+                    transition: "color 0.12s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--c-t5)"; }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Input container */}
         <div
           style={{
             padding: "6px 8px 8px",
             borderRadius: "14px",
-            border: yolo ? "1px solid rgba(255,255,255,0.07)" : "1px solid #3a3a3e",
-            backgroundColor: yolo ? "rgba(255,255,255,0.04)" : "#1a1a1e",
-            ...(yolo ? { backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" } : {}),
-            transition: "border-color 0.15s",
+            border: yolo ? "1px solid rgba(255,255,255,0.15)" : "1px solid var(--c-bd2)",
+            backgroundColor: yolo ? "rgba(8,8,16,0.12)" : "var(--c-bg2)",
+            transition: "border-color 0.15s, box-shadow 0.6s ease",
             position: "relative",
+            ...(disabled
+              ? { animation: yolo ? "yolo-input-glow 3s ease-in-out infinite" : "input-glow 3s ease-in-out infinite" }
+              : { boxShadow: "none" }),
           }}
         >
           {/* Expand / Collapse button */}
@@ -256,13 +487,13 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
               border: "none",
               borderRadius: "4px",
               backgroundColor: "transparent",
-              color: "#6a6a6e",
+              color: "var(--c-t5)",
               cursor: "pointer",
               transition: "all 0.15s",
               zIndex: 1,
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#2a2a2e"; e.currentTarget.style.color = "#a0a0a0"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--c-bd)"; e.currentTarget.style.color = "var(--c-t2)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "var(--c-t5)"; }}
           >
             <svg
               width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -287,7 +518,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
               resize: "none",
               border: "none",
               backgroundColor: "transparent",
-              color: "#e0e0e0",
+              color: "var(--c-txt)",
               fontSize: "14px",
               lineHeight: 1.5,
               outline: "none",
@@ -304,6 +535,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
 
           {/* Bottom bar: selectors + send */}
           <div
+            ref={toolbarRef}
             style={{
               display: "flex",
               alignItems: "center",
@@ -325,11 +557,11 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     display: "inline-flex",
                     alignItems: "center",
                     gap: "4px",
-                    padding: "3px 10px",
+                    padding: narrow ? "3px 8px" : "3px 10px",
                     borderRadius: "6px",
-                    border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid #3a3a3e",
-                    backgroundColor: modeOpen ? (yolo ? "rgba(255,255,255,0.06)" : "#1e1e22") : "transparent",
-                    color: yolo ? "#b0b0b8" : "#a0a0a0",
+                    border: yolo ? "1px solid rgba(255,255,255,0.15)" : "1px solid var(--c-bd2)",
+                    backgroundColor: modeOpen ? (yolo ? "rgba(255,255,255,0.08)" : "var(--c-bg3)") : (yolo ? "rgba(255,255,255,0.04)" : "transparent"),
+                    color: yolo ? "#d0d0d8" : "var(--c-t2)",
                     fontSize: "12px",
                     fontWeight: 500,
                     cursor: "pointer",
@@ -338,24 +570,27 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     height: "32px",
                     boxSizing: "border-box",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(255,255,255,0.06)" : "#1e1e22"; if (!yolo) e.currentTarget.style.borderColor = "#5a5a5e"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg3)"; if (!yolo) e.currentTarget.style.borderColor = "var(--c-t4)"; }}
                   onMouseLeave={(e) => {
-                    if (!modeOpen && !closing) {
+                    if (!modeOpen && !modeClosing) {
                       e.currentTarget.style.backgroundColor = "transparent";
-                      if (!yolo) e.currentTarget.style.borderColor = "#3a3a3e";
+                      if (!yolo) e.currentTarget.style.borderColor = "var(--c-bd2)";
                     }
                   }}
                 >
-                  {mode}
-                  <svg
-                    width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                    style={{ transform: modeOpen ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 0.2s", flexShrink: 0 }}
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
+                  <ModeIcon mode={mode} size={14} />
+                  {!narrow && <span style={{ lineHeight: 1 }}>{mode}</span>}
+                  {!narrow && (
+                    <svg
+                      width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ transform: modeOpen ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 0.2s", flexShrink: 0 }}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  )}
                 </button>
 
-                {(modeOpen || closing) && (
+                {(modeOpen || modeClosing) && (
                   <>
                     <div onClick={startClose} style={{ position: "fixed", inset: 0, zIndex: 99 }} />
                     <div
@@ -364,29 +599,29 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                         bottom: "calc(100% + 4px)",
                         left: "4px",
                         zIndex: 100,
-                        backgroundColor: yolo ? "rgba(15,15,20,0.55)" : "#1e1e22",
-                        border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid #39393e",
+                        backgroundColor: yolo ? "rgba(15,15,20,0.55)" : "var(--c-bg3)",
+                        border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid var(--c-bd2)",
                         borderRadius: "8px",
                         padding: "4px",
                         boxShadow: yolo ? "0 -4px 32px rgba(0,0,0,0.6)" : "0 -4px 24px rgba(0,0,0,0.5)",
-                        minWidth: "140px",
-                        animation: `${closing ? "drop-up-out" : "drop-up"} 0.18s ease-out both`,
+                        minWidth: "200px",
+                        animation: `${modeClosing ? "drop-up-out" : "drop-up"} 0.18s ease-out both`,
                         transformOrigin: "bottom left",
                         ...(yolo ? { backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" } : {}),
                       }}
                     >
-                      {MODES.map((m) => {
+                      {MODES.filter(m => yolo || m !== "Yolo").map((m) => {
                         const isSelected = m === mode;
-                        const unsupported = m === "Yolo";
+                        const disabled = m === "Agent";
                         return (
                           <button
                             key={m}
                             onClick={() => {
-                              if (unsupported) return;
+                              if (disabled) return;
                               onModeChange(m as Mode);
                               startClose();
                             }}
-                            onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "#2a2a2e"; }}
+                            onMouseEnter={(e) => { if (!isSelected && !disabled) e.currentTarget.style.backgroundColor = "var(--c-bd)"; }}
                             onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
                             style={{
                               display: "flex",
@@ -399,18 +634,19 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                               fontSize: "13px",
                               fontWeight: isSelected ? 600 : 400,
                               textAlign: "left",
-                              cursor: unsupported ? "default" : "pointer",
+                              cursor: disabled ? "default" : "pointer",
                               backgroundColor: isSelected ? "rgba(37,99,235,0.15)" : "transparent",
-                              color: isSelected ? "#e0e0e0" : unsupported ? "#6a6a6e" : "#8a8a8e",
+                              color: isSelected ? "var(--c-txt)" : disabled ? "var(--c-t5)" : "var(--c-t6)",
                               transition: "all 0.15s",
                               fontFamily: "inherit",
-                              opacity: unsupported && !isSelected ? 0.6 : 1,
+                              opacity: disabled && !isSelected ? 0.6 : 1,
                             }}
                           >
+                            <ModeIcon mode={m} size={16} />
                             <span style={{ flex: 1 }}>{m}</span>
-                            {unsupported && (
-                              <span style={{ fontSize: "11px", color: "#5a5a5e" }}>
-                                暂不支持
+                            {disabled && (
+                              <span style={{ fontSize: "11px", color: "var(--c-t4)" }}>
+                                [不可用]
                               </span>
                             )}
                           </button>
@@ -432,51 +668,56 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: "4px",
-                      padding: "3px 10px 3px 8px",
+                      gap: narrow ? "0" : "4px",
+                      padding: narrow ? "3px 8px" : "3px 10px 3px 8px",
                       borderRadius: "6px",
-                      border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid #3a3a3e",
-                      backgroundColor: modelOpen ? (yolo ? "rgba(255,255,255,0.06)" : "#1e1e22") : "transparent",
-                      color: yolo ? "#b0b0b8" : "#a0a0a0",
+                    border: yolo ? "1px solid rgba(255,255,255,0.15)" : "1px solid var(--c-bd2)",
+                    backgroundColor: modelOpen ? (yolo ? "rgba(255,255,255,0.08)" : "var(--c-bg3)") : (yolo ? "rgba(255,255,255,0.04)" : "transparent"),
+                    color: yolo ? "#d0d0d8" : "var(--c-t2)",
                       fontSize: "12px",
                       fontWeight: 500,
                       cursor: "pointer",
                       transition: "all 0.15s",
                       fontFamily: "inherit",
-                      maxWidth: "160px",
+                      maxWidth: narrow ? "32px" : "160px",
                       height: "32px",
                       boxSizing: "border-box",
+                      justifyContent: "center",
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(255,255,255,0.06)" : "#1e1e22"; if (!yolo) e.currentTarget.style.borderColor = "#5a5a5e"; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg3)"; if (!yolo) e.currentTarget.style.borderColor = "var(--c-t4)"; }}
                     onMouseLeave={(e) => {
-                      if (!modelOpen && !closing) {
+                      if (!modelOpen && !modelClosing) {
                         e.currentTarget.style.backgroundColor = "transparent";
-                        if (!yolo) e.currentTarget.style.borderColor = "#3a3a3e";
+                        if (!yolo) e.currentTarget.style.borderColor = "var(--c-bd2)";
                       }
                     }}
                   >
                     {/* Status dot */}
                     <span
                       style={{
-                        width: "6px",
-                        height: "6px",
+                        width: "7px",
+                        height: "7px",
                         borderRadius: "50%",
-                        backgroundColor: selectedModel?.apiKey ? "#22c55e" : "#5a5a5e",
+                        backgroundColor: selectedModel?.apiKey ? "#22c55e" : "var(--c-t4)",
                         flexShrink: 0,
                       }}
                     />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {selectedModel?.name ?? "Select model"}
-                    </span>
-                    <svg
-                      width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                      style={{ transform: modelOpen ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 0.2s", flexShrink: 0 }}
-                    >
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
+                    {!narrow && (
+                      <>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {selectedModel?.name ?? "Select model"}
+                        </span>
+                        <svg
+                          width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                          style={{ transform: modelOpen ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 0.2s", flexShrink: 0 }}
+                        >
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </>
+                    )}
                   </button>
 
-                  {(modelOpen || closing) && (
+                  {(modelOpen || modelClosing) && (
                     <>
                       <div onClick={startClose} style={{ position: "fixed", inset: 0, zIndex: 99 }} />
                       <div
@@ -485,13 +726,13 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                           bottom: "calc(100% + 4px)",
                           left: "4px",
                           zIndex: 100,
-                          backgroundColor: yolo ? "rgba(15,15,20,0.55)" : "#1e1e22",
-                          border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid #39393e",
+                          backgroundColor: yolo ? "rgba(15,15,20,0.55)" : "var(--c-bg3)",
+                          border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid var(--c-bd2)",
                           borderRadius: "8px",
                           padding: "4px",
                           boxShadow: yolo ? "0 -4px 32px rgba(0,0,0,0.6)" : "0 -4px 24px rgba(0,0,0,0.5)",
                           minWidth: "260px",
-                          animation: `${closing ? "drop-up-out" : "drop-up"} 0.18s ease-out both`,
+                          animation: `${modelClosing ? "drop-up-out" : "drop-up"} 0.18s ease-out both`,
                           transformOrigin: "bottom left",
                           ...(yolo ? { backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" } : {}),
                         }}
@@ -506,7 +747,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                                 setSelectedModelId(m.id);
                                 startClose();
                               }}
-                              onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "#2a2a2e"; }}
+                              onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "var(--c-bd)"; }}
                               onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = "transparent"; }}
                               style={{
                                 display: "flex",
@@ -521,7 +762,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                                 textAlign: "left",
                                 cursor: "pointer",
                                 backgroundColor: isSelected ? "rgba(37,99,235,0.15)" : "transparent",
-                                color: isSelected ? "#e0e0e0" : "#8a8a8e",
+                                color: isSelected ? "var(--c-txt)" : "var(--c-t6)",
                                 transition: "all 0.15s",
                                 fontFamily: "inherit",
                               }}
@@ -531,12 +772,12 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                                   width: "6px",
                                   height: "6px",
                                   borderRadius: "50%",
-                                  backgroundColor: hasKey ? "#22c55e" : "#5a5a5e",
+                                  backgroundColor: hasKey ? "#22c55e" : "var(--c-t4)",
                                   flexShrink: 0,
                                 }}
                               />
                               <span style={{ flex: 1 }}>{m.name}</span>
-                              <span style={{ fontSize: "11px", color: "#5a5a5e" }}>{m.provider}</span>
+                              <span style={{ fontSize: "11px", color: "var(--c-t4)" }}>{m.provider}</span>
                             </button>
                           );
                         })}
@@ -546,8 +787,56 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                 </div>
               )}
 
-            {/* 上下文容量 + 压缩开关（与模型按钮统一高度和间距） */}
-            {maxTokens && maxTokens > 0 && (
+            {/* 上下文容量 + 压缩开关 */}
+            {maxTokens && maxTokens > 0 && (narrow ? (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  height: "32px",
+                  padding: "0 6px",
+                  borderRadius: "6px",
+                  border: yolo ? "1px solid rgba(255,255,255,0.07)" : "1px solid var(--c-bd2)",
+                  fontSize: "11px",
+                  boxSizing: "border-box",
+                }}
+                title={`${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens`}
+              >
+                {/* 指示灯 */}
+                <span
+                  style={{
+                    width: "7px",
+                    height: "7px",
+                    borderRadius: "50%",
+                    backgroundColor: usageColor(pct),
+                    flexShrink: 0,
+                    transition: "background-color 0.3s",
+                  }}
+                />
+                {/* Z 图标作为压缩开关 */}
+                <button
+                  onClick={onToggleCompression}
+                  title={compressionEnabled ? "压缩已开启" : "开启压缩"}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "2px",
+                    borderRadius: "4px",
+                    border: "none",
+                    cursor: "pointer",
+                    backgroundColor: "transparent",
+                    color: compressionEnabled ? "#60a5fa" : (yolo ? "rgba(255,255,255,0.4)" : "var(--c-t5)"),
+                    lineHeight: 1,
+                    transition: "all 0.2s",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  <CompressIcon size={13} active={compressionEnabled} />
+                </button>
+              </div>
+            ) : (
               <div
                 style={{
                   display: "inline-flex",
@@ -556,9 +845,9 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                   height: "32px",
                   padding: "0 8px",
                   borderRadius: "6px",
-                  border: yolo ? "1px solid rgba(255,255,255,0.07)" : "1px solid #3a3a3e",
+                  border: yolo ? "1px solid rgba(255,255,255,0.07)" : "1px solid var(--c-bd2)",
                   fontSize: "11px",
-                  color: yolo ? "rgba(255,255,255,0.85)" : "#8a8a8e",
+                  color: yolo ? "rgba(255,255,255,0.85)" : "var(--c-t6)",
                   userSelect: "none",
                   boxSizing: "border-box",
                 }}
@@ -578,7 +867,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                 <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                   {pct}%
                 </span>
-                <span style={{ color: yolo ? "rgba(255,255,255,0.5)" : "#5a5a5e" }}>
+                <span style={{ color: yolo ? "rgba(255,255,255,0.5)" : "var(--c-t4)" }}>
                   {usedTokens.toLocaleString()}/{maxTokens.toLocaleString()}
                 </span>
 
@@ -591,7 +880,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                   }}
                 />
 
-                {/* 压缩开关：单选按钮样式 */}
+                {/* 压缩开关 */}
                 <button
                   onClick={onToggleCompression}
                   title={
@@ -608,7 +897,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     border: "none",
                     cursor: "pointer",
                     backgroundColor: "transparent",
-                    color: compressionEnabled ? "#60a5fa" : (yolo ? "rgba(255,255,255,0.6)" : "#6a6a6e"),
+                    color: compressionEnabled ? "#60a5fa" : (yolo ? "rgba(255,255,255,0.6)" : "var(--c-t5)"),
                     fontSize: "11px",
                     lineHeight: 1,
                     transition: "all 0.2s",
@@ -622,7 +911,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                       width: "12px",
                       height: "12px",
                       borderRadius: "50%",
-                      border: `2px solid ${compressionEnabled ? "#60a5fa" : "#5a5a5e"}`,
+                      border: `2px solid ${compressionEnabled ? "#60a5fa" : "var(--c-t4)"}`,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -645,7 +934,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                   <span>压缩上下文</span>
                 </button>
               </div>
-            )}
+            ))}
             </div>
 
             {/* Right: Send / Stop button */}
@@ -684,17 +973,17 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                   width: "32px",
                   height: "32px",
                   borderRadius: "8px",
-                  border: yolo ? (text.trim() ? "1px solid rgba(59,130,246,0.4)" : "1px solid rgba(255,255,255,0.1)") : "none",
+                  border: yolo ? (text.trim() ? "1px solid rgba(59,130,246,0.5)" : "1px solid rgba(255,255,255,0.12)") : "none",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: text.trim() ? "pointer" : "default",
                   backgroundColor: yolo
-                    ? (text.trim() ? "rgba(37,99,235,0.2)" : "rgba(255,255,255,0.03)")
-                    : (text.trim() ? "#2563eb" : "#2a2a2e"),
+                    ? (text.trim() ? "rgba(37,99,235,0.35)" : "rgba(255,255,255,0.05)")
+                    : (text.trim() ? "var(--c-ac)" : "var(--c-bd)"),
                   color: yolo
-                    ? (text.trim() ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.2)")
-                    : (text.trim() ? "#fff" : "#6a6a6e"),
+                    ? (text.trim() ? "#ffffff" : "rgba(255,255,255,0.25)")
+                    : (text.trim() ? "#fff" : "var(--c-t5)"),
                   fontSize: "16px",
                   flexShrink: 0,
                   transition: "all 0.15s",
@@ -812,7 +1101,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
         <p
           style={{
             fontSize: "11px",
-            color: yolo ? "rgba(255,255,255,0.15)" : "#5a5a5e",
+            color: yolo ? "rgba(255,255,255,0.15)" : "var(--c-t4)",
             textAlign: "center",
             marginTop: "0",
             marginBottom: "2px",

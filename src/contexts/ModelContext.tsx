@@ -6,7 +6,7 @@ const STORAGE_KEY = "unison-models";
 
 let nextModelId = 1;
 
-const DEFAULT_PARAMS: ModelConfig["params"] = { temperature: 1, maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0 };
+const DEFAULT_PARAMS: ModelConfig["params"] = { temperature: 1, maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0, allowFileUpload: false };
 
 function normalizeModel(m: ModelConfig): ModelConfig {
   return { ...m, params: { ...DEFAULT_PARAMS, ...(m.params ?? {}) } };
@@ -20,7 +20,7 @@ const DEFAULT_PRESETS: ModelConfig[] = [
     apiKey: "",
     modelName: "gpt-4o",
     baseUrl: "",
-    params: { temperature: 1, maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0 },
+    params: { temperature: 1, maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0, allowFileUpload: true },
   },
   {
     id: "preset-claude",
@@ -29,7 +29,7 @@ const DEFAULT_PRESETS: ModelConfig[] = [
     apiKey: "",
     modelName: "claude-3-5-sonnet-20241022",
     baseUrl: "",
-    params: { temperature: 1, maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0 },
+    params: { temperature: 1, maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0, allowFileUpload: true },
   },
   {
     id: "preset-gemini",
@@ -38,7 +38,7 @@ const DEFAULT_PRESETS: ModelConfig[] = [
     apiKey: "",
     modelName: "gemini-2.0-flash",
     baseUrl: "",
-    params: { temperature: 1, maxTokens: 8192, topP: 1, frequencyPenalty: 0, presencePenalty: 0 },
+    params: { temperature: 1, maxTokens: 8192, topP: 1, frequencyPenalty: 0, presencePenalty: 0, allowFileUpload: true },
   },
 ];
 
@@ -121,7 +121,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       apiKey: "",
       modelName: "",
       baseUrl: "",
-      params: { temperature: 1, maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0 },
+      params: { temperature: 1, maxTokens: 4096, topP: 1, frequencyPenalty: 0, presencePenalty: 0, allowFileUpload: false },
     };
     setModels((prev) => {
       const next = [...prev, newModel];

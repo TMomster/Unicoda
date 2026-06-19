@@ -1,5 +1,6 @@
 use base64::Engine;
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::OnceLock;
 use tauri::Manager;
 
@@ -277,13 +278,26 @@ fn get_http_client() -> &'static reqwest::Client {
     })
 }
 
+/// 获取一个不经过系统代理的 HTTP client（用于访问本地服务）
+fn get_local_http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .no_proxy()
+            .cookie_store(true)
+            .build()
+            .expect("Failed to create local HTTP client")
+    })
+}
+
 #[tauri::command]
-async fn http_fetch(app_handle: tauri::AppHandle, url: String, user_agent: Option<String>, timeout_ms: Option<u64>) -> Result<String, String> {
+async fn http_fetch(app_handle: tauri::AppHandle, url: String, user_agent: Option<String>, timeout_ms: Option<u64>, no_proxy: Option<bool>, accept_header: Option<String>) -> Result<String, String> {
     let ua = user_agent.unwrap_or_else(||
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string()
     );
 
-    let client = get_http_client();
+    let use_no_proxy = no_proxy.unwrap_or(false);
+    let client = if use_no_proxy { get_local_http_client() } else { get_http_client() };
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(10_000));
 
     // ── 加载持久化 Cookie ──
@@ -293,7 +307,7 @@ async fn http_fetch(app_handle: tauri::AppHandle, url: String, user_agent: Optio
         .get(&url)
         .timeout(timeout)
         .header("User-Agent", &ua)
-        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+        .header("Accept", accept_header.clone().unwrap_or_else(|| "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8".to_string()))
         .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
         .header("Cache-Control", "no-cache")
         .header("Pragma", "no-cache")
@@ -315,7 +329,11 @@ async fn http_fetch(app_handle: tauri::AppHandle, url: String, user_agent: Optio
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("HTTP request failed: {}", e))?;
+        .map_err(|e| {
+            let kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else if e.is_body() { "body" } else if e.is_request() { "request" } else if e.is_decode() { "decode" } else { "unknown" };
+            let src = e.source().map(|s| s.to_string()).unwrap_or_else(|| "none".to_string());
+            format!("HTTP request failed (kind={}, source={}): {} - {}", kind, src, e.status().map(|s| s.to_string()).unwrap_or_else(|| "N/A".to_string()), e)
+        })?;
 
     let status = resp.status();
     if status.is_redirection() {

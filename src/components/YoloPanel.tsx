@@ -1,16 +1,19 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { Conversation, Message, Mode } from "../types";
+import type { Conversation, Message, Mode, FileAttachment } from "../types";
 import { useTheme } from "../contexts/ThemeContext";
 import { useModels } from "../contexts/ModelContext";
 import { streamChatCompletion } from "../services/modelApi";
 import { writeConfigFile, readConfigFile } from "../utils/configStorage";
 import { buildAgentSystemPrompt, parseToolCalls, stripToolCalls, executeToolCall } from "../services/agentEngine";
+import { compressConversation, MIN_MESSAGES_FOR_COMPRESSION } from "../services/conversationCompression";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon } from "../constants/windowIcons";
 import AuroraBackground from "./AuroraBackground";
-import ChatPanel from "./ChatPanel";
+import YoloChatPanel from "./YoloChatPanel";
 import InputBar from "./InputBar";
 import SettingsPanel from "./SettingsPanel";
+import ComponentsPanel from "./ComponentsPanel";
+import FilePreviewPanel from "./FilePreviewPanel";
 
 const STORAGE_KEY = "unison-yolo-conversations";
 let nextConvId = 1;
@@ -126,16 +129,18 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
   const sorted = [...conversations].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt);
 
   return (
-    <>
-      {open && <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 89 }} />}
-      <div style={{
-        position: "fixed", left: 0, top: 0, height: "100vh", zIndex: 1001,
+    <div style={{
+      width: open ? "240px" : "0",
+      overflow: "hidden",
+      flexShrink: 0,
+      transition: "width 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
         width: "240px",
+        height: "100%",
         display: "flex", flexDirection: "column",
-        backgroundColor: "rgba(8,8,12,0.55)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
-        borderRight: open ? "1px solid rgba(255,255,255,0.08)" : "1px solid transparent",
-        transform: open ? "translateX(0)" : "translateX(-100%)",
-        transition: "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s ease",
+        backgroundColor: "transparent", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
+        borderRight: "1px solid rgba(255,255,255,0.08)",
       }}>
         {/* Header */}
         <div style={{
@@ -218,13 +223,13 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
           })}
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
 // ── Yolo Header (window controls on right) ─────
-function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenSettings }: {
-  title: string; onBack: () => void; onToggleSession: () => void; onToggleWorkspace: () => void; onOpenSettings: () => void;
+function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenSettings, onOpenComponents }: {
+  title: string; onBack: () => void; onToggleSession: () => void; onToggleWorkspace: () => void; onOpenSettings: () => void; onOpenComponents: () => void;
 }) {
   const [hover, setHover] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -290,6 +295,13 @@ function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenS
           onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
         </button>
+        <button onClick={onOpenComponents} title="组件" style={btnBase}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+        </button>
       </div>
       {/* ── Right: minimize | maximize/restore | close ── */}
       <div style={{ display: "flex", height: "100%", alignItems: "stretch" }}>
@@ -354,42 +366,6 @@ function YoloWelcome() {
         background: "linear-gradient(90deg, transparent, rgba(200, 150, 255, 0.3), transparent)",
         borderRadius: "1px", marginTop: "8px",
       }} />
-    </div>
-  );
-}
-
-// ── Settings with glass background (refined) ─
-function YoloSettingsOverlay({ onBack }: { onBack: () => void }) {
-  return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 300,
-      display: "flex", flexDirection: "column",
-      animation: "yolo-fade-in 0.25s ease",
-    }}>
-      <style>{`
-        @keyframes yolo-fade-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes yolo-slide-up {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
-      <AuroraBackground />
-      <div style={{
-        position: "absolute", inset: 0, zIndex: 0,
-        backgroundColor: "rgba(8, 8, 12, 0.55)",
-        backdropFilter: "blur(20px)",
-        WebkitBackdropFilter: "blur(20px)",
-      }} />
-      <div style={{
-        position: "relative", zIndex: 1, flex: 1,
-        display: "flex", flexDirection: "column",
-        animation: "yolo-slide-up 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
-      }}>
-        <SettingsPanel onBack={onBack} yolo />
-      </div>
     </div>
   );
 }
@@ -500,10 +476,69 @@ export default function YoloPanel({ onBack }: Props) {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsAnim, setSettingsAnim] = useState<"enter" | "exit">("enter");
+  const [componentsOpen, setComponentsOpen] = useState(false);
+  const [componentsAnim, setComponentsAnim] = useState<"enter" | "exit">("enter");
+  const [previewFile, setPreviewFile] = useState<FileAttachment | null>(null);
+  const [compressionEnabled, setCompressionEnabled] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
+
+  const openSettings = useCallback(() => {
+    setSettingsOpen(true);
+    setSettingsAnim("enter");
+  }, []);
+
+  const openComponents = useCallback(() => {
+    setComponentsOpen(true);
+    setComponentsAnim("enter");
+  }, []);
+
+  const closeComponents = useCallback(() => {
+    setComponentsAnim("exit");
+    setTimeout(() => {
+      setComponentsOpen(false);
+      setComponentsAnim("enter");
+    }, 250);
+  }, []);
+
+  const closeSettings = useCallback(() => {
+    setSettingsAnim("exit");
+    setTimeout(() => {
+      setSettingsOpen(false);
+      setSettingsAnim("enter");
+    }, 250);
+  }, []);
 
   const updateConv = useCallback((id: string, updater: (c: Conversation) => Conversation) => {
     setConversations((prev) => prev.map((c) => (c.id === id ? updater(c) : c)));
   }, []);
+
+  const handleToggleCompression = useCallback(() => {
+    setCompressionEnabled((v) => !v);
+  }, []);
+
+  const handleCompressNow = useCallback(async () => {
+    if (!activeConv || !selectedModel || isCompressing) return;
+    if (activeConv.messages.length < MIN_MESSAGES_FOR_COMPRESSION) return;
+    setIsCompressing(true);
+    try {
+      const result = await compressConversation(
+        activeConv.messages,
+        selectedModel,
+      );
+      if (result.summary) {
+        updateConv(activeId!, (c) => ({
+          ...c,
+          messages: result.messages,
+          updatedAt: Date.now(),
+        }));
+      }
+    } catch {
+      // silent
+    } finally {
+      setIsCompressing(false);
+    }
+  }, [activeConv, activeId, selectedModel, updateConv, isCompressing]);
 
   function buildApiMessages(prev: Message[], userMsg: Message, sendMode: Mode): { role: string; content: string }[] {
     const result: { role: string; content: string }[] = [];
@@ -520,7 +555,13 @@ export default function YoloPanel({ onBack }: Props) {
         result.push({ role: m.role, content: m.content });
       }
     }
-    result.push({ role: userMsg.role, content: userMsg.content });
+    // 合并文件内容到用户消息
+    let finalContent = userMsg.content;
+    if (userMsg.files && userMsg.files.length > 0) {
+      const fileBlocks = userMsg.files.map((f) => `[文件: ${f.name}]\n${f.data}`);
+      finalContent = fileBlocks.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
+    }
+    result.push({ role: userMsg.role, content: finalContent });
     return result;
   }
 
@@ -594,11 +635,11 @@ export default function YoloPanel({ onBack }: Props) {
     }
   }
 
-  const handleSend = useCallback(async (text: string, sendMode?: Mode) => {
+  const handleSend = useCallback(async (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
     if (!activeId || !selectedModel) return;
     const currentMode = sendMode ?? mode;
     if (abortRef.current) abortRef.current.abort();
-    const userMsg: Message = { id: String(nextMsgId++), role: "user", content: text, timestamp: Date.now() };
+    const userMsg: Message = { id: String(nextMsgId++), role: "user", content: text, timestamp: Date.now(), files };
     const currentConv = conversations.find((c) => c.id === activeId);
     const prevMessages = currentConv?.messages ?? [];
     setIsStreaming(true);
@@ -661,6 +702,10 @@ export default function YoloPanel({ onBack }: Props) {
           from { opacity: 0; transform: translateY(8px); }
           to { opacity: 1; transform: translateY(0); }
         }
+        @keyframes settings-fade-out {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
       `}</style>
       <AuroraBackground />
       <div style={{
@@ -668,29 +713,43 @@ export default function YoloPanel({ onBack }: Props) {
         flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
       }}>
         <div style={{ animation: "yolo-header-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both" }}>
-          <YoloHeader title={activeConv?.title ?? "Unison"} onBack={() => onBack?.()} onToggleSession={() => setSessionOpen((v) => !v)} onToggleWorkspace={() => setWorkspaceOpen((v) => !v)} onOpenSettings={() => setSettingsOpen(true)} />
+          <YoloHeader title={activeConv?.title ?? "Unison"} onBack={() => onBack?.()} onToggleSession={() => setSessionOpen((v) => !v)} onToggleWorkspace={() => setWorkspaceOpen((v) => !v)} onOpenSettings={openSettings} onOpenComponents={openComponents} />
         </div>
-        <YoloSessionSidebar open={sessionOpen} onClose={() => setSessionOpen(false)} conversations={conversations} activeId={activeId} onSelect={handleSelect} onCreate={handleCreate} onDelete={handleDelete} />
-        <WorkspaceDrawer open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} onSelectFolder={handleSelectFolder} />
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div key={activeConv ? `yolo-chat-${activeId}` : "yolo-empty"} style={{
-            flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
-            animation: "yolo-content-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both",
-          }}>
-            {activeConv && activeConv.messages.length > 0 ? (
-              <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo />
-            ) : (
-              <YoloWelcome />
-            )}
-            {activeConv && (
-              <div style={{ animation: "yolo-input-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both" }}>
-                <InputBar onSend={handleSend} onStop={handleStop} disabled={isStreaming} messages={activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} mode={mode} onModeChange={setMode} yolo />
+        <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0 }}>
+          <YoloSessionSidebar open={sessionOpen} onClose={() => setSessionOpen(false)} conversations={conversations} activeId={activeId} onSelect={handleSelect} onCreate={handleCreate} onDelete={handleDelete} />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }} onClick={() => { if (sessionOpen) setSessionOpen(false); }}>
+            <WorkspaceDrawer open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} onSelectFolder={handleSelectFolder} />
+            <div style={{
+              flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
+            }}>
+              <div key={activeConv ? `yolo-chat-${activeId}` : "yolo-empty"} style={{
+                flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
+                animation: "yolo-content-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both",
+              }}>
+                {activeConv && activeConv.messages.length > 0 ? (
+                  <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} />
+                ) : (
+                  <YoloWelcome />
+                )}
               </div>
-            )}
+              {activeConv && (
+                <InputBar onSend={handleSend} onStop={handleStop} disabled={isStreaming} messages={activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={compressionEnabled} onToggleCompression={handleToggleCompression} onCompressNow={handleCompressNow} isCompressing={isCompressing} mode={mode} onModeChange={setMode} yolo />
+              )}
+            </div>
           </div>
         </div>
-      </div>
-      {settingsOpen && <YoloSettingsOverlay onBack={() => setSettingsOpen(false)} />}
+        </div>
+      {settingsOpen && (
+        <div style={{ animation: settingsAnim === "exit" ? "settings-fade-out 0.25s ease both" : undefined }}>
+          <SettingsPanel onBack={closeSettings} yolo />
+        </div>
+      )}
+      {componentsOpen && (
+        <div style={{ animation: componentsAnim === "exit" ? "settings-fade-out 0.25s ease both" : undefined }}>
+          <ComponentsPanel onBack={closeComponents} yolo />
+        </div>
+      )}
+      <FilePreviewPanel file={previewFile} onClose={() => setPreviewFile(null)} />
     </div>
   );
 }
