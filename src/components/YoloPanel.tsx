@@ -5,6 +5,9 @@ import { useModels } from "../contexts/ModelContext";
 import { streamChatCompletion } from "../services/modelApi";
 import { writeConfigFile, readConfigFile } from "../utils/configStorage";
 import { buildAgentSystemPrompt, parseToolCalls, stripToolCalls, executeToolCall } from "../services/agentEngine";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon } from "../constants/windowIcons";
+import AuroraBackground from "./AuroraBackground";
 import ChatPanel from "./ChatPanel";
 import InputBar from "./InputBar";
 import SettingsPanel from "./SettingsPanel";
@@ -28,127 +31,364 @@ function flushConversations(convs: Conversation[], path: string) {
   writeConfigFile(STORAGE_KEY, convs, path);
 }
 
-// ── Aurora Background ───────────────────────────
-function AuroraBackground() {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const animRef = useRef(0);
-  const timeRef = useRef(0);
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const gradients = [
-      { cx: 15, cy: 25, r: 55, color: "rgba(70, 200, 255, 0.25)" },
-      { cx: 85, cy: 65, r: 50, color: "rgba(200, 100, 255, 0.2)" },
-      { cx: 40, cy: 70, r: 55, color: "rgba(0, 255, 200, 0.18)" },
-      { cx: 70, cy: 30, r: 50, color: "rgba(100, 220, 255, 0.2)" },
-    ];
-    const baseLinear = "linear-gradient(135deg, #0b2b5e 0%, #1a4b7a 25%, #3a6a9a 50%, #5a3a7a 75%, #2a4a7a 100%)";
-    const animate = () => {
-      timeRef.current += 0.008;
-      const t = timeRef.current;
-      const shifted = gradients.map((g, i) => `radial-gradient(circle at ${g.cx + Math.sin(t + i * 1.57) * 25}% ${g.cy + Math.cos(t * 0.8 + i * 1.57) * 20}%, ${g.color} 0%, transparent ${g.r + Math.sin(t * 0.6 + i) * 14}%)`);
-      el.style.background = [...shifted, baseLinear].join(", ");
-      el.style.backgroundBlendMode = "overlay, screen, lighten, normal, normal";
-      animRef.current = requestAnimationFrame(animate);
-    };
-    animRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animRef.current);
-  }, []);
-  return <div ref={canvasRef} style={{ position: "fixed", inset: 0, zIndex: 0 }} />;
-}
-
-// ── Workspace Drawer ────────────────────────────
-function WorkspaceDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+// ── Workspace Drawer (glass consistent) ──────
+function WorkspaceDrawer({ open, onClose, onSelectFolder }: {
+  open: boolean; onClose: () => void; onSelectFolder: () => void;
+}) {
   const { t, sessionPath } = useTheme();
   return (
     <>
       {open && <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 29 }} />}
       <div style={{
-        position: "relative", zIndex: 30, maxHeight: open ? "200px" : "0", overflow: "hidden",
-        transition: "max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1)",
-        backgroundColor: "rgba(20, 20, 25, 0.85)", backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-        borderBottom: open ? "1px solid rgba(255,255,255,0.06)" : "none",
+        position: "relative", zIndex: 30, maxHeight: open ? "240px" : "0", overflow: "hidden",
+        transition: "max-height 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
+        backgroundColor: "rgba(8, 8, 12, 0.35)", backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        borderBottom: open ? "1px solid rgba(255,255,255,0.08)" : "none",
       }}>
-        <div style={{ padding: open ? "16px 24px" : "0 24px", opacity: open ? 1 : 0, transition: "opacity 0.2s ease 0.1s" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
-            <span style={{ fontSize: "13px", fontWeight: 600, color: "#c0c0c0" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ verticalAlign: "middle", marginRight: "6px" }}>
+        <div style={{
+          padding: open ? "18px 24px 20px" : "0 24px",
+          opacity: open ? 1 : 0,
+          transition: "opacity 0.25s ease 0.1s",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(100,180,255,0.7)" strokeWidth="1.8">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
               </svg>
-              {t("yoloWorkspace")}
-            </span>
-            <button onClick={onClose} style={{ width: "24px", height: "24px", borderRadius: "6px", border: "none", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "#c0c0c0", letterSpacing: "0.3px" }}>
+                {t("yoloWorkspace")}
+              </span>
+            </div>
+            <button onClick={onClose}
+              style={{ width: "26px", height: "26px", borderRadius: "6px", border: "none", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
             </button>
           </div>
-          <div style={{ fontSize: "12px", color: "#8a8a8e", lineHeight: 1.8 }}>
-            {sessionPath ? <span style={{ wordBreak: "break-all" }}>{sessionPath}</span> : <span style={{ color: "#5a5a5e" }}>{t("yoloNoWorkspace")}</span>}
+
+          <div style={{
+            padding: "12px 16px", borderRadius: "8px",
+            backgroundColor: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            fontSize: "12px", color: "#8a8a8e", lineHeight: 1.8,
+          }}>
+            {sessionPath ? (
+              <span style={{ wordBreak: "break-all", color: "#a0a0a0" }}>{sessionPath}</span>
+            ) : (
+              <span style={{ color: "#5a5a5e", fontStyle: "italic" }}>{t("yoloNoWorkspace")}</span>
+            )}
           </div>
-          <div style={{ marginTop: "12px", fontSize: "11px", color: "#6a6a6e", lineHeight: 1.6 }}>{t("yoloWorkspaceDesc")}</div>
+
+          <div style={{ marginTop: "14px", display: "flex", gap: "8px" }}>
+            <button onClick={onSelectFolder}
+              style={{
+                flex: 1, padding: "9px 14px", borderRadius: "8px", border: "1px solid rgba(59,130,246,0.3)",
+                background: "rgba(59,130,246,0.1)", color: "#60a5fa", fontSize: "12px", fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(59,130,246,0.2)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.5)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(59,130,246,0.1)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.3)"; }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                <polyline points="12 11 12 17" /><line x1="9" y1="14" x2="15" y2="14" />
+              </svg>
+              {t("yoloSelectFolder")}
+            </button>
+          </div>
+
+          <div style={{ marginTop: "10px", fontSize: "11px", color: "rgba(255,255,255,0.25)", lineHeight: 1.6, textAlign: "center" }}>
+            {t("yoloWorkspaceDesc")}
+          </div>
         </div>
       </div>
     </>
   );
 }
 
-// ── Yolo Header ─────────────────────────────────
-function YoloHeader({ title, onBack, onToggleWorkspace, onOpenSettings }: {
-  title: string; onBack: () => void; onToggleWorkspace: () => void; onOpenSettings: () => void;
+// ── Yolo session sidebar (slides from left) ───
+function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, onCreate, onDelete }: {
+  open: boolean; onClose: () => void;
+  conversations: Conversation[]; activeId: string;
+  onSelect: (id: string) => void; onCreate: () => void; onDelete: (id: string) => void;
+}) {
+  const [contextMenuId, setContextMenuId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!contextMenuId) return;
+    const close = () => setContextMenuId(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [contextMenuId]);
+
+  const sorted = [...conversations].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt);
+
+  return (
+    <>
+      {open && <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 89 }} />}
+      <div style={{
+        position: "fixed", left: 0, top: 0, height: "100vh", zIndex: 1001,
+        width: "240px",
+        display: "flex", flexDirection: "column",
+        backgroundColor: "rgba(8,8,12,0.55)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
+        borderRight: open ? "1px solid rgba(255,255,255,0.08)" : "1px solid transparent",
+        transform: open ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s ease",
+      }}>
+        {/* Header */}
+        <div style={{
+          height: "40px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0 12px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+          userSelect: "none",
+        }}>
+          <span style={{ fontSize: "12px", fontWeight: 600, color: "#b0b0b8", letterSpacing: "0.3px" }}>会话</span>
+          <button onClick={onClose}
+            style={{ width: "24px", height: "24px", borderRadius: "6px", border: "none", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+
+        {/* New session button */}
+        <div style={{ padding: "10px 12px", flexShrink: 0 }}>
+          <button onClick={() => { onCreate(); onClose(); }}
+            style={{
+              width: "100%", padding: "8px 0", borderRadius: "8px",
+              border: "1px solid rgba(59,130,246,0.25)", background: "rgba(59,130,246,0.08)",
+              color: "#60a5fa", fontSize: "12px", fontWeight: 600, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+              fontFamily: "inherit", transition: "all 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(59,130,246,0.18)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.5)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.25)"; }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            <span>新会话</span>
+          </button>
+        </div>
+
+        {/* Conversation list */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
+          {sorted.map((conv) => {
+            const isActive = conv.id === activeId;
+            return (
+              <div key={conv.id} style={{ position: "relative" }}>
+                <div
+                  onClick={() => { onSelect(conv.id); onClose(); }}
+                  onContextMenu={(e) => { e.preventDefault(); setContextMenuId(conv.id); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "8px",
+                    padding: "8px 10px", borderRadius: "6px", cursor: "pointer",
+                    marginBottom: "2px",
+                    backgroundColor: isActive ? "rgba(37,99,235,0.12)" : "transparent",
+                    color: isActive ? "#d0d0d8" : "#a0a0a8",
+                    fontSize: "12px", lineHeight: 1.6, fontFamily: "inherit",
+                    transition: "background 0.12s",
+                  }}
+                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.04)"; }}
+                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = "transparent"; }}>
+                  {conv.pinned && <span style={{ fontSize: "10px", color: "#60a5fa", flexShrink: 0 }}>📌</span>}
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.title}</span>
+                  <span style={{ fontSize: "10px", color: "#5a5a5e", flexShrink: 0 }}>{conv.messages.length}</span>
+                </div>
+                {/* Right-click context menu */}
+                {contextMenuId === conv.id && (
+                  <div style={{
+                    position: "absolute", right: "8px", top: "100%", zIndex: 100,
+                    backgroundColor: "rgba(15,15,20,0.75)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+                    border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px",
+                    padding: "4px", boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                    minWidth: "120px",
+                  }} onClick={(e) => e.stopPropagation()}>
+                    <div onClick={() => { setContextMenuId(null); onDelete(conv.id); }}
+                      style={{
+                        padding: "7px 10px", borderRadius: "6px", fontSize: "12px",
+                        color: "#ef4444", cursor: "pointer", transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.1)"}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
+                      删除会话
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Yolo Header (window controls on right) ─────
+function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenSettings }: {
+  title: string; onBack: () => void; onToggleSession: () => void; onToggleWorkspace: () => void; onOpenSettings: () => void;
 }) {
   const [hover, setHover] = useState(false);
-  const btnBase: React.CSSProperties = { width: "26px", height: "26px", borderRadius: "6px", border: "none", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" };
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    const win = getCurrentWindow();
+    win.isMaximized().then(setIsMaximized);
+    const unlisten = win.onResized(() => {
+      win.isMaximized().then(setIsMaximized);
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
+  const handleMinimize = () => getCurrentWindow().minimize();
+  const handleMaxRestore = () => getCurrentWindow().toggleMaximize();
+  const handleClose = () => getCurrentWindow().close();
+
+  const btnBase: React.CSSProperties = {
+    width: "28px", height: "28px", borderRadius: "7px", border: "none",
+    background: "transparent", color: "#6a6a6e", cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s",
+  };
+  const winBtn: React.CSSProperties = {
+    width: "46px", height: "36px", border: "none",
+    background: "transparent", color: "#8a8a8e", cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.12s",
+  };
+
   return (
-    <div data-tauri-drag-region style={{ height: "36px", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", flexShrink: 0, userSelect: "none", backgroundColor: hover ? "rgba(255,255,255,0.04)" : "transparent", transition: "background 0.15s" }}
+    <div data-tauri-drag-region style={{
+      height: "40px", display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "0 0 0 10px", flexShrink: 0, userSelect: "none",
+      backgroundColor: hover ? "rgba(255,255,255,0.03)" : "transparent",
+      transition: "background 0.2s",
+      borderBottom: "1px solid rgba(255,255,255,0.04)",
+    }}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      {/* ── Left: back | workspace | session | settings ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
         <button onClick={onBack} title="返回默认面板" style={btnBase}
           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
           onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
         </button>
-        <span style={{ fontSize: "12px", fontWeight: 500, color: "#8a8a8e", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
-      </div>
-      <div style={{ display: "flex", gap: "4px" }}>
-        <button onClick={onOpenSettings} title="设置" style={btnBase}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-        </button>
+        <div style={{ width: "1px", height: "16px", backgroundColor: "rgba(255,255,255,0.06)" }} />
         <button onClick={onToggleWorkspace} title="工作区" style={btnBase}
           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
           onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
         </button>
+        <button onClick={onToggleSession}
+          style={{
+            ...btnBase, width: "auto", height: "28px", padding: "0 8px", gap: "5px",
+            fontSize: "12px", fontWeight: 500, color: "#b0b0b8", letterSpacing: "0.3px",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#d0d0d8"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#b0b0b8"; }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+          <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+        </button>
+        <button onClick={onOpenSettings} title="设置" style={btnBase}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+        </button>
+      </div>
+      {/* ── Right: minimize | maximize/restore | close ── */}
+      <div style={{ display: "flex", height: "100%", alignItems: "stretch" }}>
+        <button onClick={handleMinimize} style={winBtn}
+          title="最小化"
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
+          <MinimizeIcon />
+        </button>
+        <button onClick={handleMaxRestore} style={winBtn}
+          title={isMaximized ? "还原" : "最大化"}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
+          {isMaximized ? <RestoreIcon bgFill="transparent" /> : <MaximizeIcon />}
+        </button>
+        <button onClick={handleClose} style={{ ...winBtn, marginRight: 0 }}
+          title="关闭"
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#e81123"; e.currentTarget.style.color = "#fff"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#8a8a8e"; }}>
+          <CloseIcon />
+        </button>
       </div>
     </div>
   );
 }
 
-// ── Welcome screen ──────────────────────────────
+// ── Welcome screen (enhanced) ────────────────
 function YoloWelcome() {
   const { t } = useTheme();
+  const [visible, setVisible] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setVisible(true), 80); return () => clearTimeout(t); }, []);
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "20px", padding: "40px 20px" }}>
-      <div style={{ fontSize: "36px", fontWeight: 300, color: "rgba(255,255,255,0.7)", letterSpacing: "2px", textShadow: "0 0 40px rgba(200,220,255,0.3)" }}>
+    <div style={{
+      flex: 1, display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      gap: "24px", padding: "40px 20px",
+      opacity: visible ? 1 : 0,
+      transform: visible ? "translateY(0)" : "translateY(12px)",
+      transition: "opacity 0.6s ease, transform 0.6s cubic-bezier(0.22, 1, 0.36, 1)",
+    }}>
+      <div style={{
+        width: "60px", height: "2px",
+        background: "linear-gradient(90deg, transparent, rgba(100, 200, 255, 0.5), transparent)",
+        borderRadius: "1px",
+      }} />
+      <div style={{
+        fontSize: "40px", fontWeight: 200, color: "rgba(255,255,255,0.75)",
+        letterSpacing: "4px",
+        textShadow: "0 0 60px rgba(150,200,255,0.25), 0 0 120px rgba(100,150,255,0.1)",
+      }}>
         {t("yoloWelcome")}
       </div>
-      <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.35)", textAlign: "center", maxWidth: "320px", lineHeight: 1.6 }}>
+      <p style={{
+        fontSize: "13px", color: "rgba(255,255,255,0.3)",
+        textAlign: "center", maxWidth: "340px", lineHeight: 1.8,
+        letterSpacing: "0.5px",
+      }}>
         {t("whatToDo")}
       </p>
+      <div style={{
+        width: "40px", height: "1px",
+        background: "linear-gradient(90deg, transparent, rgba(200, 150, 255, 0.3), transparent)",
+        borderRadius: "1px", marginTop: "8px",
+      }} />
     </div>
   );
 }
 
-// ── Settings with glass background ──────────────
+// ── Settings with glass background (refined) ─
 function YoloSettingsOverlay({ onBack }: { onBack: () => void }) {
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", flexDirection: "column" }}>
-      <div style={{ position: "absolute", inset: 0, zIndex: 0, backgroundColor: "rgba(10, 10, 15, 0.6)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }} />
-      <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column" }}>
-        <SettingsPanel onBack={onBack} />
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 300,
+      display: "flex", flexDirection: "column",
+      animation: "yolo-fade-in 0.25s ease",
+    }}>
+      <style>{`
+        @keyframes yolo-fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes yolo-slide-up {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+      <AuroraBackground />
+      <div style={{
+        position: "absolute", inset: 0, zIndex: 0,
+        backgroundColor: "rgba(8, 8, 12, 0.55)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+      }} />
+      <div style={{
+        position: "relative", zIndex: 1, flex: 1,
+        display: "flex", flexDirection: "column",
+        animation: "yolo-slide-up 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
+      }}>
+        <SettingsPanel onBack={onBack} yolo />
       </div>
     </div>
   );
@@ -158,7 +398,7 @@ function YoloSettingsOverlay({ onBack }: { onBack: () => void }) {
 interface Props { onBack?: () => void; }
 
 export default function YoloPanel({ onBack }: Props) {
-  const { scale, fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode } = useTheme();
+  const { fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode, setSessionPath } = useTheme();
   const { models, selectedModelId } = useModels();
   const selectedModel = models.find((m) => m.id === selectedModelId);
 
@@ -206,13 +446,59 @@ export default function YoloPanel({ onBack }: Props) {
   const sessionPathRef = useRef(sessionPath);
   sessionPathRef.current = sessionPath;
 
-  const [activeId] = useState<string>(conversations[0].id);
+  const [activeId, setActiveId] = useState<string>(conversations[0].id);
   const activeConv = conversations.find((c) => c.id === activeId) ?? null;
+
+  // ── Session management ──────────────────────
+  const handleCreate = useCallback(() => {
+    const newId = String(nextConvId++);
+    setConversations((prev) => {
+      const conv: Conversation = {
+        id: newId,
+        title: makeConvTitle(prev, locale),
+        messages: [],
+        pinned: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      const updated = [...prev, conv];
+      flushConversations(updated, sessionPath);
+      return updated;
+    });
+    setActiveId(newId);
+  }, [locale, sessionPath]);
+
+  const handleSelect = useCallback((id: string) => {
+    setActiveId(id);
+  }, []);
+
+  const handleDelete = useCallback((id: string) => {
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      if (next.length === 0) {
+        const fresh: Conversation = {
+          id: String(nextConvId++),
+          title: makeConvTitle(prev, locale),
+          messages: [],
+          pinned: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        flushConversations([fresh], sessionPath);
+        setActiveId(fresh.id);
+        return [fresh];
+      }
+      flushConversations(next, sessionPath);
+      if (activeId === id) setActiveId(next[0].id);
+      return next;
+    });
+  }, [activeId, locale, sessionPath]);
   const [mode, setMode] = useState<Mode>("Chat");
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const streamingMsgIdRef = useRef<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [sessionOpen, setSessionOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const updateConv = useCallback((id: string, updater: (c: Conversation) => Conversation) => {
@@ -226,7 +512,14 @@ export default function YoloPanel({ onBack }: Props) {
       : buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt);
     const kbExtra = prev.find((m) => m.role === "assistant" && m.content.startsWith("[对话历史摘要]"));
     result.push({ role: "system", content: sp + (kbExtra ? `\n\n## 前期对话摘要\n\n${kbExtra.content}` : "") });
-    for (const m of prev.filter((m) => !m.content.startsWith("[对话历史摘要]"))) result.push({ role: m.role, content: m.content });
+    for (const m of prev) {
+      if (m.content.startsWith("[对话历史摘要]")) continue;
+      if (m.role === "tool") {
+        result.push({ role: "user" as const, content: `[工具执行结果 - ${m.toolCallId || "unknown"}]\n${m.toolCallError ? `执行错误：${m.toolCallError}` : m.content}` });
+      } else {
+        result.push({ role: m.role, content: m.content });
+      }
+    }
     result.push({ role: userMsg.role, content: userMsg.content });
     return result;
   }
@@ -257,7 +550,7 @@ export default function YoloPanel({ onBack }: Props) {
         const cc = stripToolCalls(fullContent);
         if (cc !== fullContent) updateConv(aid, (c) => ({ ...c, messages: c.messages.map((m) => m.id === asstId ? { ...m, content: cc } : m), updatedAt: Date.now() }));
         for (const call of toolCalls) {
-          const result = await executeToolCall(call, ac.signal);
+          const result = await executeToolCall(call, ac.signal, selectedModel);
           updateConv(aid, (c) => ({ ...c, messages: [...c.messages, { id: String(nextMsgId++), role: "tool", content: result.content, toolCallId: call.id, toolCallError: result.error, timestamp: Date.now() } as Message], updatedAt: Date.now() }));
           allToolResults.push({ role: "user", content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}` });
           if (toolCalls.length > 1) await new Promise((r) => setTimeout(r, 500));
@@ -292,7 +585,7 @@ export default function YoloPanel({ onBack }: Props) {
         const cc = stripToolCalls(fullContent);
         if (cc !== fullContent) updateConv(aid, (c) => ({ ...c, messages: c.messages.map((m) => m.id === asstId ? { ...m, content: cc } : m), updatedAt: Date.now() }));
         for (const call of toolCalls) {
-          const result = await executeToolCall(call, ac.signal);
+          const result = await executeToolCall(call, ac.signal, selectedModel);
           updateConv(aid, (c) => ({ ...c, messages: [...c.messages, { id: String(nextMsgId++), role: "tool", content: result.content, toolCallId: call.id, toolCallError: result.error, timestamp: Date.now() } as Message], updatedAt: Date.now() }));
           allToolResults.push({ role: "user", content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}` });
           if (toolCalls.length > 1) await new Promise((r) => setTimeout(r, 500));
@@ -334,25 +627,65 @@ export default function YoloPanel({ onBack }: Props) {
 
   const handleStop = useCallback(() => { if (abortRef.current) abortRef.current.abort(); }, []);
 
-  const transformScale = scale / 100 * 0.70;
-  const scaleStyle = { width: `${100 / transformScale}vw`, height: `${100 / transformScale}vh`, transform: `scale(${transformScale})`, transformOrigin: "top left" };
+  const handleSelectFolder = useCallback(async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected: string | null = await open({ directory: true, multiple: false, title: "Select Workspace Folder" });
+      if (selected) setSessionPath(selected);
+    } catch { /* fallback */ }
+  }, [setSessionPath]);
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", flexDirection: "column", fontFamily }}>
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 1000,
+      display: "flex", flexDirection: "column", fontFamily,
+    }}>
+      <style>{`
+        @keyframes yolo-card-enter {
+          0%   { opacity: 0; transform: translateY(10px) scale(0.97); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes yolo-header-enter {
+          0%   { opacity: 0; transform: translateY(-6px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes yolo-content-enter {
+          0%   { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes yolo-input-enter {
+          0%   { opacity: 0; transform: translateY(10px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes yolo-slide-up {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
       <AuroraBackground />
-      <div style={{ position: "fixed", inset: 0, zIndex: 1, backgroundColor: "rgba(10, 10, 15, 0.45)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }} />
-      <div style={{ position: "relative", zIndex: 2, flex: 1, display: "flex", flexDirection: "column", minHeight: 0, ...scaleStyle }}>
-        <YoloHeader title={activeConv?.title ?? "Unison"} onBack={() => onBack?.()} onToggleWorkspace={() => setWorkspaceOpen((v) => !v)} onOpenSettings={() => setSettingsOpen(true)} />
-        <WorkspaceDrawer open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} />
+      <div style={{
+        position: "relative", zIndex: 1,
+        flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
+      }}>
+        <div style={{ animation: "yolo-header-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both" }}>
+          <YoloHeader title={activeConv?.title ?? "Unison"} onBack={() => onBack?.()} onToggleSession={() => setSessionOpen((v) => !v)} onToggleWorkspace={() => setWorkspaceOpen((v) => !v)} onOpenSettings={() => setSettingsOpen(true)} />
+        </div>
+        <YoloSessionSidebar open={sessionOpen} onClose={() => setSessionOpen(false)} conversations={conversations} activeId={activeId} onSelect={handleSelect} onCreate={handleCreate} onDelete={handleDelete} />
+        <WorkspaceDrawer open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} onSelectFolder={handleSelectFolder} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div key={activeConv ? `yolo-chat-${activeId}` : "yolo-empty"} style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div key={activeConv ? `yolo-chat-${activeId}` : "yolo-empty"} style={{
+            flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
+            animation: "yolo-content-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both",
+          }}>
             {activeConv && activeConv.messages.length > 0 ? (
-              <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} />
+              <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo />
             ) : (
               <YoloWelcome />
             )}
             {activeConv && (
-              <InputBar onSend={handleSend} onStop={handleStop} disabled={isStreaming} messages={activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} mode={mode} onModeChange={setMode} />
+              <div style={{ animation: "yolo-input-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both" }}>
+                <InputBar onSend={handleSend} onStop={handleStop} disabled={isStreaming} messages={activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} mode={mode} onModeChange={setMode} yolo />
+              </div>
             )}
           </div>
         </div>

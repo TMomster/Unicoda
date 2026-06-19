@@ -7,9 +7,10 @@ import { invoke } from "@tauri-apps/api/core";
 import AnimatedSection from "./AnimatedSection";
 import type { ModelParams } from "../types";
 
-interface Props { onBack: () => void; }
+interface Props { onBack: () => void; yolo?: boolean; }
 const TO = [1, 3, 5, 10, 15, 30] as const;
 const C = { bg: "#0f0f11", border: "#2a2a2e", bf: "#2563eb", txt: "#e0e0e0", t2: "#a0a0a0", t3: "#7a7a7e", t4: "#5a5a5e", ac: "#2563eb", ah: "#1d4ed8" };
+const YB = { bg: "rgba(10,10,15,0.25)", bborder: "rgba(255,255,255,0.06)", b2: "rgba(255,255,255,0.1)", b3: "rgba(20,20,28,0.5)" };
 const PP = ["Deepseek", "OpenAI", "Anthropic", "Google"];
 
 interface DRPreset { label: string; desc: string; mn: string; bu: string; p: Partial<ModelParams>; }
@@ -39,17 +40,30 @@ function RS({ label, val, min, max, step, oc, dv }: { label: string; val: number
       style={{ width: "100%", height: "4px", appearance: "none", background: `linear-gradient(to right, ${C.ac} ${p}%, ${C.border} ${p}%)`, borderRadius: "2px", outline: "none", cursor: "pointer" }} />
   </div>);
 }
-function SE({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
-  return (<div style={{ paddingTop: "32px", paddingBottom: "32px" }}>
-    <div style={{ padding: "0 32px" }}>
-      <div style={{ fontSize: "16px", fontWeight: 700, color: C.txt, lineHeight: 1.6 }}>{title}</div>
-      {desc && <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.8, marginTop: "6px" }}>{desc}</div>}
+function SE({ title, desc, children, yolo }: { title: string; desc?: string; children: React.ReactNode; yolo?: boolean }) {
+  return (
+    <div style={{
+      paddingTop: "32px", paddingBottom: "32px",
+      ...(yolo ? {
+        margin: "0 12px 12px",
+        padding: "24px 0",
+        borderRadius: "16px",
+        backgroundColor: "rgba(10,10,18,0.25)",
+        backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+        border: "1px solid rgba(255,255,255,0.05)",
+        boxShadow: "0 0 40px rgba(0,0,0,0.2)",
+      } : {}),
+    }}>
+      <div style={{ padding: "0 24px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 700, color: C.txt, lineHeight: 1.6 }}>{title}</div>
+        {desc && <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.8, marginTop: "6px" }}>{desc}</div>}
+      </div>
+      <div style={{ padding: "20px 24px 0" }}>{children}</div>
     </div>
-    <div style={{ padding: "20px 32px 0" }}>{children}</div>
-  </div>);
+  );
 }
 
-export default function SettingsPanel({ onBack }: Props) {
+export default function SettingsPanel({ onBack, yolo }: Props) {
   const { scale, setScale, selectedFontName, setSelectedFont, fontOptions, t, locale, setLocale, sessionPath, setSessionPath, userName, setUserName, userAvatar, setUserAvatar, defaultMarkdown, setDefaultMarkdown, defaultReasoningOpen, setDefaultReasoningOpen, developerMode, setDeveloperMode, resetSettings } = useTheme();
   const { models, selectedModelId, setSelectedModelId, addModel, updateModel, removeModel } = useModels();
   const { hasPassword, privacyEnabled, setPrivacyEnabled, idleTimeout, setIdleTimeout, startupLockEnabled, setStartupLockEnabled, setPassword, changePassword, clearPassword } = useLock();
@@ -114,20 +128,38 @@ export default function SettingsPanel({ onBack }: Props) {
     setRecOpen(null);
   }, [updateModel]);
 
+  const y = yolo;
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: C.bg }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "18px 32px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: y ? "transparent" : C.bg }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: "14px",
+        padding: "18px 32px",
+        borderBottom: `1px solid ${y ? YB.bborder : C.border}`,
+        flexShrink: 0,
+        ...(y ? { backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", backgroundColor: YB.bg } : {}),
+      }}>
         <button onClick={onBack} title={t("back")}
-          style={{ width: "34px", height: "34px", borderRadius: "8px", border: `1px solid ${C.border}`, background: C.bg, color: C.t3, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+          style={{
+            width: "34px", height: "34px", borderRadius: "8px",
+            border: `1px solid ${y ? YB.b2 : C.border}`,
+            background: y ? YB.b3 : C.bg,
+            color: C.t3, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s",
+          }}
           onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.color = C.txt; }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.t3; }}>
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = y ? YB.b2 : C.border; e.currentTarget.style.color = C.t3; }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
         </button>
         <div><div style={{ fontSize: "17px", fontWeight: 700, color: C.txt, lineHeight: 1.6 }}>{t("settingsTitle")}</div><div style={{ fontSize: "12px", color: C.t4, marginTop: "2px" }}>Unison</div></div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 0 48px" }}>
-        <SE title={t("uiLanguage")}>
+      <div style={{
+        flex: 1, overflowY: "auto", padding: "0 0 48px",
+        ...(y ? {
+          backgroundColor: "rgba(10,10,18,0.3)",
+          backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+        } : {}),
+      }}>
+        <SE yolo={y} title={t("uiLanguage")}>
           <div style={{ marginBottom: "28px" }}>
             <div style={fl}>{t("userName")}</div>
             <input value={userName} onChange={(e) => setUserName(e.target.value)} style={is} placeholder={t("userNamePlaceholder")} />
@@ -211,7 +243,7 @@ export default function SettingsPanel({ onBack }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE title={t("privacyService")} desc={t("privacyDesc")}>
+        <SE yolo={y} title={t("privacyService")} desc={t("privacyDesc")}>
           <div onClick={() => spE((v) => !v)}
             style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", cursor: "pointer", userSelect: "none", borderRadius: "8px", border: `1px solid ${C.border}`, lineHeight: 1.6, transition: "border-color 0.15s, background 0.15s" }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "#141417"; }}
@@ -300,7 +332,7 @@ export default function SettingsPanel({ onBack }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE title={t("sessionStorage")}>
+        <SE yolo={y} title={t("sessionStorage")}>
           <div>
             <div style={fl}>{t("sessionPath")}</div>
             <div style={{ display: "flex", gap: "8px" }}>
@@ -334,7 +366,7 @@ export default function SettingsPanel({ onBack }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE title={t("defaultMarkdown")}>
+        <SE yolo={y} title={t("defaultMarkdown")}>
           <div style={{ marginBottom: "24px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={fl}>{t("defaultMarkdown")}</span>
@@ -355,7 +387,7 @@ export default function SettingsPanel({ onBack }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE title={t("developerMode")} desc={t("developerModeDesc")}>
+        <SE yolo={y} title={t("developerMode")} desc={t("developerModeDesc")}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.6 }}>{t("developerModeToggle")}</div>
@@ -366,7 +398,7 @@ export default function SettingsPanel({ onBack }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE title={t("cookieManagement")} desc={t("cookieManagementDesc")}>
+        <SE yolo={y} title={t("cookieManagement")} desc={t("cookieManagementDesc")}>
           {cookieMsg && (
             <div
               onClick={() => setCookieMsg(null)}
@@ -422,7 +454,7 @@ export default function SettingsPanel({ onBack }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE title={t("modelService")}>
+        <SE yolo={y} title={t("modelService")}>
           <div onClick={() => smE((v) => !v)}
             style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", cursor: "pointer", userSelect: "none", borderRadius: "8px", border: `1px solid ${C.border}`, lineHeight: 1.6, transition: "border-color 0.15s, background 0.15s" }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "#141417"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}>
@@ -557,7 +589,7 @@ export default function SettingsPanel({ onBack }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE title={t("disclaimerTitle")}>
+        <SE yolo={y} title={t("disclaimerTitle")}>
           <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.8, display: "flex", flexDirection: "column", gap: "12px" }}>
             <div>• {t("disclaimerFee")}</div>
             <div>• {t("disclaimerSecurity")}</div>

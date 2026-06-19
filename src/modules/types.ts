@@ -1,11 +1,11 @@
 import type { Mode } from "../types";
 
 /**
- * 模组的敏感等级。
- * - "low": 所有模式（Chat, Agent）均可用
- * - "high": 仅 Agent 可用，Chat 无权调用
+ * 模组的权限等级。
+ * - "normal": 普通模组，所有模式（Chat, Agent）均可用
+ * - "sensitive": 敏感模组，仅 Agent 可用，Chat 无权调用（当前尚未实现）
  */
-export type ModuleLevel = "low" | "high";
+export type ModuleLevel = "normal" | "sensitive";
 
 /**
  * 模组参数的元数据定义。
@@ -46,7 +46,7 @@ export function getModulesForMode(
   all: Module[],
   mode: Mode,
 ): Module[] {
-  if (mode === "Chat") return all.filter((c) => c.level === "low");
-  // Agent 模式：所有模组可见
+  if (mode === "Chat") return all.filter((c) => c.level === "normal");
+  // Agent 模式：所有模组（包括敏感模组）可见
   return [...all];
 }

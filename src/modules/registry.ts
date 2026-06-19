@@ -26,4 +26,6 @@ export function initBuiltinModules(): void {
   // 各模组的注册函数会在模块顶层调用 registerModule
   import("./builtins/getCurrentTime");
   import("./builtins/webSearch");
+  import("./builtins/fetchPage");
+  import("./builtins/summaryPage");
 }

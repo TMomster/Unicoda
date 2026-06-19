@@ -99,6 +99,10 @@ export function LockProvider({ children }: { children: ReactNode }) {
   // 启动时异步加载锁定配置
   useEffect(() => {
     loadLockConfig().then((loadedConfig) => {
+      // 如果未启用启动锁，则忽略持久化的 isLocked 状态
+      if (!loadedConfig.startupLockEnabled) {
+        loadedConfig.isLocked = false;
+      }
       setConfig(loadedConfig);
       setLoaded(true);
     });

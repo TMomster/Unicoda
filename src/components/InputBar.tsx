@@ -59,6 +59,9 @@ styles.textContent = `
   .chat-scroll::-webkit-scrollbar-thumb:hover {
     background: #5a5a5e;
   }
+  .yolo-input-area::placeholder {
+    color: rgba(255,255,255,0.25) !important;
+  }
 `;
 document.head.appendChild(styles);
 
@@ -111,13 +114,15 @@ interface Props {
   isCompressing?: boolean;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
+  /** Yolo 玻璃模式样式 */
+  yolo?: boolean;
 }
 
 const LINE_HEIGHT_PX = 21;  // 14px font * 1.5 line-height
 const MAX_NORMAL_LINES = 5;
 const MAX_NORMAL_HEIGHT = MAX_NORMAL_LINES * LINE_HEIGHT_PX + 8;  // +8 for vertical padding
 
-export default function InputBar({ onSend, onStop, disabled, messages, maxTokens, compressionEnabled, onToggleCompression, onCompressNow, isCompressing, mode, onModeChange }: Props) {
+export default function InputBar({ onSend, onStop, disabled, messages, maxTokens, compressionEnabled, onToggleCompression, onCompressNow, isCompressing, mode, onModeChange, yolo }: Props) {
   const { t } = useTheme();
   const { models, selectedModelId, setSelectedModelId } = useModels();
   const [text, setText] = useState("");
@@ -212,7 +217,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
   return (
     <div
       style={{
-        backgroundColor: "#0f0f11",
+        backgroundColor: yolo ? "transparent" : "#0f0f11",
         padding: "0 16px 5px",
       }}
     >
@@ -228,8 +233,9 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
           style={{
             padding: "6px 8px 8px",
             borderRadius: "14px",
-            border: "1px solid #3a3a3e",
-            backgroundColor: "#1a1a1e",
+            border: yolo ? "1px solid rgba(255,255,255,0.07)" : "1px solid #3a3a3e",
+            backgroundColor: yolo ? "rgba(255,255,255,0.04)" : "#1a1a1e",
+            ...(yolo ? { backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" } : {}),
             transition: "border-color 0.15s",
             position: "relative",
           }}
@@ -274,7 +280,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
             onKeyDown={handleKeyDown}
             placeholder={disabled ? t("generating") : t("inputPlaceholder")}
             rows={1}
-            className="input-area"
+            className={`input-area${yolo ? " yolo-input-area" : ""}`}
             disabled={disabled}
             style={{
               width: "100%",
@@ -321,9 +327,9 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     gap: "4px",
                     padding: "3px 10px",
                     borderRadius: "6px",
-                    border: "1px solid #3a3a3e",
-                    backgroundColor: modeOpen ? "#1e1e22" : "transparent",
-                    color: "#a0a0a0",
+                    border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid #3a3a3e",
+                    backgroundColor: modeOpen ? (yolo ? "rgba(255,255,255,0.06)" : "#1e1e22") : "transparent",
+                    color: yolo ? "#b0b0b8" : "#a0a0a0",
                     fontSize: "12px",
                     fontWeight: 500,
                     cursor: "pointer",
@@ -332,11 +338,11 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     height: "32px",
                     boxSizing: "border-box",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; e.currentTarget.style.borderColor = "#5a5a5e"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(255,255,255,0.06)" : "#1e1e22"; if (!yolo) e.currentTarget.style.borderColor = "#5a5a5e"; }}
                   onMouseLeave={(e) => {
                     if (!modeOpen && !closing) {
                       e.currentTarget.style.backgroundColor = "transparent";
-                      e.currentTarget.style.borderColor = "#3a3a3e";
+                      if (!yolo) e.currentTarget.style.borderColor = "#3a3a3e";
                     }
                   }}
                 >
@@ -358,14 +364,15 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                         bottom: "calc(100% + 4px)",
                         left: "4px",
                         zIndex: 100,
-                        backgroundColor: "#1e1e22",
-                        border: "1px solid #39393e",
+                        backgroundColor: yolo ? "rgba(15,15,20,0.55)" : "#1e1e22",
+                        border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid #39393e",
                         borderRadius: "8px",
                         padding: "4px",
-                        boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
+                        boxShadow: yolo ? "0 -4px 32px rgba(0,0,0,0.6)" : "0 -4px 24px rgba(0,0,0,0.5)",
                         minWidth: "140px",
                         animation: `${closing ? "drop-up-out" : "drop-up"} 0.18s ease-out both`,
                         transformOrigin: "bottom left",
+                        ...(yolo ? { backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" } : {}),
                       }}
                     >
                       {MODES.map((m) => {
@@ -428,9 +435,9 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                       gap: "4px",
                       padding: "3px 10px 3px 8px",
                       borderRadius: "6px",
-                      border: "1px solid #3a3a3e",
-                      backgroundColor: modelOpen ? "#1e1e22" : "transparent",
-                      color: "#a0a0a0",
+                      border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid #3a3a3e",
+                      backgroundColor: modelOpen ? (yolo ? "rgba(255,255,255,0.06)" : "#1e1e22") : "transparent",
+                      color: yolo ? "#b0b0b8" : "#a0a0a0",
                       fontSize: "12px",
                       fontWeight: 500,
                       cursor: "pointer",
@@ -440,11 +447,11 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                       height: "32px",
                       boxSizing: "border-box",
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#1e1e22"; e.currentTarget.style.borderColor = "#5a5a5e"; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(255,255,255,0.06)" : "#1e1e22"; if (!yolo) e.currentTarget.style.borderColor = "#5a5a5e"; }}
                     onMouseLeave={(e) => {
                       if (!modelOpen && !closing) {
                         e.currentTarget.style.backgroundColor = "transparent";
-                        e.currentTarget.style.borderColor = "#3a3a3e";
+                        if (!yolo) e.currentTarget.style.borderColor = "#3a3a3e";
                       }
                     }}
                   >
@@ -478,14 +485,15 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                           bottom: "calc(100% + 4px)",
                           left: "4px",
                           zIndex: 100,
-                          backgroundColor: "#1e1e22",
-                          border: "1px solid #39393e",
+                          backgroundColor: yolo ? "rgba(15,15,20,0.55)" : "#1e1e22",
+                          border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid #39393e",
                           borderRadius: "8px",
                           padding: "4px",
-                          boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
+                          boxShadow: yolo ? "0 -4px 32px rgba(0,0,0,0.6)" : "0 -4px 24px rgba(0,0,0,0.5)",
                           minWidth: "260px",
                           animation: `${closing ? "drop-up-out" : "drop-up"} 0.18s ease-out both`,
                           transformOrigin: "bottom left",
+                          ...(yolo ? { backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" } : {}),
                         }}
                       >
                         {models.map((m) => {
@@ -548,9 +556,9 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                   height: "32px",
                   padding: "0 8px",
                   borderRadius: "6px",
-                  border: "1px solid #3a3a3e",
+                  border: yolo ? "1px solid rgba(255,255,255,0.07)" : "1px solid #3a3a3e",
                   fontSize: "11px",
-                  color: "#8a8a8e",
+                  color: yolo ? "rgba(255,255,255,0.85)" : "#8a8a8e",
                   userSelect: "none",
                   boxSizing: "border-box",
                 }}
@@ -570,7 +578,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                 <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                   {pct}%
                 </span>
-                <span style={{ color: "#5a5a5e" }}>
+                <span style={{ color: yolo ? "rgba(255,255,255,0.5)" : "#5a5a5e" }}>
                   {usedTokens.toLocaleString()}/{maxTokens.toLocaleString()}
                 </span>
 
@@ -600,7 +608,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     border: "none",
                     cursor: "pointer",
                     backgroundColor: "transparent",
-                    color: compressionEnabled ? "#60a5fa" : "#6a6a6e",
+                    color: compressionEnabled ? "#60a5fa" : (yolo ? "rgba(255,255,255,0.6)" : "#6a6a6e"),
                     fontSize: "11px",
                     lineHeight: 1,
                     transition: "all 0.2s",
@@ -649,19 +657,20 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                   width: "32px",
                   height: "32px",
                   borderRadius: "8px",
-                  border: "none",
+                  border: yolo ? "1px solid rgba(239,68,68,0.4)" : "none",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: "pointer",
-                  backgroundColor: "#ef4444",
-                  color: "#fff",
+                  backgroundColor: yolo ? "rgba(239,68,68,0.15)" : "#ef4444",
+                  color: yolo ? "rgba(255,255,255,0.8)" : "#fff",
                   fontSize: "16px",
                   flexShrink: 0,
                   transition: "all 0.15s",
+                  ...(yolo ? { backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" } : {}),
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#dc2626"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "#ef4444"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(239,68,68,0.25)" : "#dc2626"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = yolo ? "rgba(239,68,68,0.15)" : "#ef4444"; }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <rect x="6" y="6" width="12" height="12" rx="2" />
@@ -675,16 +684,21 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                   width: "32px",
                   height: "32px",
                   borderRadius: "8px",
-                  border: "none",
+                  border: yolo ? (text.trim() ? "1px solid rgba(59,130,246,0.4)" : "1px solid rgba(255,255,255,0.1)") : "none",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: text.trim() ? "pointer" : "default",
-                  backgroundColor: text.trim() ? "#2563eb" : "#2a2a2e",
-                  color: text.trim() ? "#fff" : "#6a6a6e",
+                  backgroundColor: yolo
+                    ? (text.trim() ? "rgba(37,99,235,0.2)" : "rgba(255,255,255,0.03)")
+                    : (text.trim() ? "#2563eb" : "#2a2a2e"),
+                  color: yolo
+                    ? (text.trim() ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.2)")
+                    : (text.trim() ? "#fff" : "#6a6a6e"),
                   fontSize: "16px",
                   flexShrink: 0,
                   transition: "all 0.15s",
+                  ...(yolo ? { backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" } : {}),
                 }}
               >
                 <svg
@@ -798,7 +812,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
         <p
           style={{
             fontSize: "11px",
-            color: "#5a5a5e",
+            color: yolo ? "rgba(255,255,255,0.15)" : "#5a5a5e",
             textAlign: "center",
             marginTop: "0",
             marginBottom: "2px",

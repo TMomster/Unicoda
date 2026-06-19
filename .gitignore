@@ -40,3 +40,6 @@ $null
 
 #doc
 doc/
+
+#test
+test/

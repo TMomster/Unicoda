@@ -13,6 +13,8 @@ interface Props {
   defaultReasoningOpen?: boolean;
   developerMode?: boolean;
   t: (key: string) => string;
+  /** Yolo 玻璃模式 — 透明背景 */
+  yolo?: boolean;
 }
 
 function WelcomeScreen() {
@@ -103,6 +105,7 @@ export default function ChatPanel({
   defaultReasoningOpen,
   developerMode,
   t,
+  yolo,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -125,7 +128,7 @@ export default function ChatPanel({
       style={{
         flex: 1,
         overflowY: "auto",
-        backgroundColor: "#0f0f11",
+        backgroundColor: yolo ? "transparent" : "#0f0f11",
         position: "relative",
       }}
     >
@@ -137,7 +140,7 @@ export default function ChatPanel({
         }}
       >
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} />
+          <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo={yolo} />
         ))}
       </div>
     </div>

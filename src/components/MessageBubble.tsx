@@ -11,6 +11,8 @@ interface Props {
   defaultReasoningOpen?: boolean;
   developerMode?: boolean;
   t: (key: string) => string;
+  /** Yolo 玻璃模式风格 */
+  yolo?: boolean;
 }
 
 const animations = `
@@ -52,7 +54,7 @@ const animations = `
 .double-helix .dot:nth-child(8) { background: #818cf8; animation-delay: 0.7s; }
 `;
 
-export default function MessageBubble({ message, modelName, userName, userAvatar, defaultMarkdown = true, defaultReasoningOpen = false, developerMode = false, t }: Props) {
+export default function MessageBubble({ message, modelName, userName, userAvatar, defaultMarkdown = true, defaultReasoningOpen = false, developerMode = false, t, yolo }: Props) {
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
   const isStreaming = message.streaming;
@@ -89,7 +91,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
         display: "flex",
         gap: "12px",
         padding: "16px 0",
-        borderBottom: "1px solid #1a1a1e",
+        borderBottom: yolo ? "1px solid rgba(255,255,255,0.04)" : "1px solid #1a1a1e",
       }}
     >
       {/* Avatar */}
@@ -104,7 +106,10 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
           justifyContent: "center",
           fontSize: "14px",
           fontWeight: 700,
-          backgroundColor: isUser ? "#000" : isTool ? "#7c3aed" : "#14b8a6",
+          backgroundColor: yolo
+            ? (isUser ? "rgba(255,255,255,0.04)" : isTool ? "rgba(124,58,237,0.2)" : "rgba(20,184,166,0.2)")
+            : (isUser ? "#000" : isTool ? "#7c3aed" : "#14b8a6"),
+          ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
           color: "#fff",
           userSelect: "none",
           overflow: "hidden",
@@ -165,8 +170,9 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
             style={{
               marginBottom: "12px",
               borderRadius: "8px",
-              border: "1px solid #2a2a2e",
+              border: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid #2a2a2e",
               overflow: "hidden",
+              ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
             }}
           >
             <div
@@ -180,12 +186,12 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                 userSelect: "none",
                 fontSize: "12px",
                 fontWeight: 600,
-                color: "#a0a0a0",
-                background: "#151518",
+                color: yolo ? "rgba(255,255,255,0.65)" : "#a0a0a0",
+                background: yolo ? "rgba(255,255,255,0.03)" : "#151518",
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#1a1a1e"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#151518"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.06)" : "#1a1a1e"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.03)" : "#151518"; }}
             >
               <svg
                 width="12"
@@ -210,9 +216,9 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                   padding: "12px",
                   fontSize: "13px",
                   lineHeight: 1.7,
-                  color: "#8a8a8e",
-                  background: "#0f0f11",
-                  borderTop: "1px solid #2a2a2e",
+                  color: yolo ? "rgba(255,255,255,0.5)" : "#8a8a8e",
+                  background: yolo ? "rgba(255,255,255,0.02)" : "#0f0f11",
+                  borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid #2a2a2e",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                   fontStyle: "italic",
@@ -238,8 +244,9 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
             <div
               style={{
                 borderRadius: "8px",
-                border: "1px solid #2a2a2e",
+                border: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid #2a2a2e",
                 overflow: "hidden",
+                ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
               }}
             >
               {/* 工具调用标题栏 — 始终可见 */}
@@ -254,12 +261,12 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                   userSelect: "none",
                   fontSize: "12px",
                   fontWeight: 600,
-                  color: "#a78bfa",
-                  background: "#151518",
+                  color: yolo ? "rgba(167,139,250,0.8)" : "#a78bfa",
+                  background: yolo ? "rgba(255,255,255,0.03)" : "#151518",
                   transition: "background 0.12s",
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "#1a1a1e"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "#151518"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.06)" : "#1a1a1e"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = yolo ? "rgba(255,255,255,0.03)" : "#151518"; }}
               >
                 <svg
                   width="12"
@@ -288,9 +295,9 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                     lineHeight: 1.6,
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
-                    color: message.toolCallError ? "#ef4444" : "#a0a0a8",
-                    background: "#0f0f11",
-                    borderTop: "1px solid #2a2a2e",
+                    color: message.toolCallError ? "#ef4444" : yolo ? "rgba(255,255,255,0.55)" : "#a0a0a8",
+                    background: yolo ? "rgba(255,255,255,0.02)" : "#0f0f11",
+                    borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid #2a2a2e",
                   }}
                 >
                   {isStreaming && !message.content
@@ -317,8 +324,9 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
             style={{
               marginTop: "12px",
               borderRadius: "8px",
-              border: "1px solid #f59e0b",
+              border: yolo ? "1px solid rgba(245,158,11,0.3)" : "1px solid #f59e0b",
               overflow: "hidden",
+              ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
             }}
           >
             <div
@@ -332,12 +340,12 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                 userSelect: "none",
                 fontSize: "12px",
                 fontWeight: 600,
-                color: "#f59e0b",
-                background: "#1c1a14",
+                color: yolo ? "rgba(245,158,11,0.8)" : "#f59e0b",
+                background: yolo ? "rgba(245,158,11,0.05)" : "#1c1a14",
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#252218"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#1c1a14"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = yolo ? "rgba(245,158,11,0.1)" : "#252218"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = yolo ? "rgba(245,158,11,0.05)" : "#1c1a14"; }}
             >
               <svg
                 width="12"
@@ -356,7 +364,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               <span>🐞 {t("developerMode")} ({message.toolDebugInfo.length} 次调用)</span>
             </div>
             {devDebugOpen && (
-              <div style={{ padding: "12px", background: "#0f0f11", borderTop: "1px solid #2a2a2e" }}>
+              <div style={{ padding: "12px", background: yolo ? "rgba(255,255,255,0.02)" : "#0f0f11", borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid #2a2a2e" }}>
                 {message.toolDebugInfo.map((entry, i) => (
                   <div key={i} style={{ marginBottom: i < message.toolDebugInfo!.length - 1 ? "16px" : 0 }}>
                     <div style={{ fontSize: "11px", fontWeight: 700, color: "#f59e0b", marginBottom: "8px", lineHeight: 1.6 }}>

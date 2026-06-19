@@ -53,7 +53,7 @@ function makeConvTitle(existing: Conversation[], locale: string): string {
 }
 
 // ─── Inner component that has access to ModelProvider context ──────
-function MainContent() {
+function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPanelMode: React.Dispatch<React.SetStateAction<PanelMode>> }) {
   const { scale, fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(() => {
@@ -119,10 +119,31 @@ function MainContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const sidebarWidthRef = useRef(280);
-  const [panelMode, setPanelMode] = useState<PanelMode>("Default");
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [transitionPhase, setTransitionPhase] = useState<"blur" | "fade" | "reveal">("blur");
+  const [yoloEntryKey, setYoloEntryKey] = useState(0);
+
   const handleTogglePanel = useCallback(() => {
-    setPanelMode((prev) => (prev === "Default" ? "Yolo" : "Default"));
-  }, []);
+    if (isTransitioning) return;
+    const target = panelMode === "Default" ? "Yolo" : "Default";
+
+    // Phase 1: blur covers the screen (300ms CSS transition)
+    setIsTransitioning(true);
+    setTransitionPhase("blur");
+
+    // Phase 2: old UI fades out behind blur (350ms)
+    setTimeout(() => { setTransitionPhase("fade"); }, 350);
+
+    // Phase 3: swap panel + new UI fades in + blur fades out
+    setTimeout(() => {
+      setPanelMode(target);
+      setTransitionPhase("reveal");
+      if (target === "Yolo") setYoloEntryKey((k) => k + 1);
+    }, 700);
+
+    // Phase 4: transition complete
+    setTimeout(() => { setIsTransitioning(false); }, 1100);
+  }, [isTransitioning, panelMode]);
 
   // ── Model + streaming state ─────────────────────────────────────
   const { models, selectedModelId } = useModels();
@@ -285,10 +306,18 @@ function MainContent() {
     result.push({ role: "system", content: finalSystem });
 
     // 过滤掉压缩摘要消息（已注入 system prompt），加上用户消息
-    const filtered = prevMessages.filter(
-      (m) => !m.content.startsWith("[对话历史摘要]"),
-    );
-    for (const m of filtered) result.push({ role: m.role, content: m.content });
+    // role="tool" 的消息转为 user 角色注入，让模型在跨轮次后仍能看到原始工具执行结果
+    for (const m of prevMessages) {
+      if (m.content.startsWith("[对话历史摘要]")) continue;
+      if (m.role === "tool") {
+        result.push({
+          role: "user" as const,
+          content: `[工具执行结果 - ${m.toolCallId || "unknown"}]\n${m.toolCallError ? `执行错误：${m.toolCallError}` : m.content}`,
+        });
+      } else {
+        result.push({ role: m.role, content: m.content });
+      }
+    }
     result.push({ role: userMsg.role, content: userMsg.content });
     return result;
   }
@@ -416,7 +445,7 @@ function MainContent() {
         const toolResults: { result: import("./services/agentEngine").ToolResult; durationMs: number }[] = [];
         for (const call of toolCalls) {
           const startTime = performance.now();
-          const result = await executeToolCall(call, abortController.signal);
+          const result = await executeToolCall(call, abortController.signal, selectedModel);
           const durationMs = Math.round(performance.now() - startTime);
           toolResults.push({ result, durationMs });
 
@@ -604,7 +633,7 @@ function MainContent() {
         const toolResults: { result: import("./services/agentEngine").ToolResult; durationMs: number }[] = [];
         for (const call of toolCalls) {
           const startTime = performance.now();
-          const result = await executeToolCall(call, abortController.signal);
+          const result = await executeToolCall(call, abortController.signal, selectedModel);
           const durationMs = Math.round(performance.now() - startTime);
           toolResults.push({ result, durationMs });
 
@@ -782,6 +811,37 @@ function MainContent() {
 
   const transformScale = scaleToTransform(scale);
 
+  // ── Blur transition derived values ─────────────
+  const defaultOpacity = !isTransitioning
+    ? (panelMode === "Default" ? 1 : 0)
+    : (panelMode === "Default" && transitionPhase !== "fade" ? 1 : 0);
+  const yoloOpacity = !isTransitioning
+    ? (panelMode === "Yolo" ? 1 : 0)
+    : (panelMode === "Yolo" && transitionPhase !== "fade" ? 1 : 0);
+  const blurOpacity = isTransitioning && transitionPhase !== "reveal" ? 1 : 0;
+
+  // Inject entrance keyframes for YoloPanel staggered animation
+  const entranceStyleTag = (
+    <style>{`
+      @keyframes yolo-entrance-card {
+        0%   { opacity: 0; transform: translateY(12px) scale(0.96); }
+        100% { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      @keyframes yolo-entrance-header {
+        0%   { opacity: 0; transform: translateY(-8px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes yolo-entrance-content {
+        0%   { opacity: 0; transform: translateY(8px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes yolo-entrance-input {
+        0%   { opacity: 0; transform: translateY(10px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+    `}</style>
+  );
+
   return (
     <div
       style={{
@@ -794,134 +854,162 @@ function MainContent() {
         backgroundColor: "#0f0f11",
         color: "#e0e0e0",
         fontFamily,
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      {/* Custom Title Bar */}
-      <TitleBar title={activeConv?.title ?? "Unison"} />
+      {entranceStyleTag}
+      {/* ── Default UI (opacity controlled for transitions) ── */}
+      <div style={{
+        width: "100%", height: "100%",
+        display: "flex", flexDirection: "column",
+        opacity: defaultOpacity,
+        transition: "opacity 0.4s ease",
+        pointerEvents: defaultOpacity > 0.5 ? "auto" : "none",
+      }}>
+        {/* Custom Title Bar */}
+        <TitleBar title={activeConv?.title ?? "Unison"} />
 
-      {/* Body */}
-      <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
-        {/* Sidebar */}
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          width={sidebarWidth}
-          conversations={conversations}
-          activeId={activeId}
-          onCreate={handleCreate}
-          onSelect={handleSelect}
-          onRename={handleRename}
-          onTogglePin={handleTogglePin}
-          onDelete={handleDelete}
-          onBatchDelete={handleBatchDelete}
-          onBatchTogglePin={handleBatchTogglePin}
-          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
-          onResize={handleResizeSidebar}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenModules={() => setModulesOpen(true)}
-          onTogglePanel={handleTogglePanel}
-        />
+        {/* Body */}
+        <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
+          {/* Sidebar */}
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            width={sidebarWidth}
+            conversations={conversations}
+            activeId={activeId}
+            onCreate={handleCreate}
+            onSelect={handleSelect}
+            onRename={handleRename}
+            onTogglePin={handleTogglePin}
+            onDelete={handleDelete}
+            onBatchDelete={handleBatchDelete}
+            onBatchTogglePin={handleBatchTogglePin}
+            onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+            onResize={handleResizeSidebar}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenModules={() => setModulesOpen(true)}
+            onTogglePanel={handleTogglePanel}
+          />
 
-        {/* Main Area */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-          }}
-        >
+          {/* Main Area */}
           <div
-            key={activeConv ? `chat-${activeId}` : "empty"}
-            className="view-transition"
             style={{
               flex: 1,
               display: "flex",
               flexDirection: "column",
-              minHeight: 0,
+              minWidth: 0,
             }}
           >
-            {/* Messages */}
-            {activeConv ? (
-              <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} />
-            ) : (
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#6a6a6e",
-                  fontSize: "14px",
-                }}
-              >
-                {t("selectOrCreate")}
-              </div>
-            )}
+            <div
+              key={activeConv ? `chat-${activeId}` : "empty"}
+              className="view-transition"
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+              }}
+            >
+              {/* Messages */}
+              {activeConv ? (
+                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} />
+              ) : (
+                <div
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#6a6a6e",
+                    fontSize: "14px",
+                  }}
+                >
+                  {t("selectOrCreate")}
+                </div>
+              )}
 
-            {/* Input */}
-            {activeConv && (
-              <InputBar
-                onSend={handleSend}
-                onStop={handleStop}
-                disabled={isStreaming}
-                messages={activeConv.messages}
-                maxTokens={selectedModel?.params?.maxTokens}
-                compressionEnabled={compressionEnabled}
-                onToggleCompression={handleToggleCompression}
-                onCompressNow={handleCompressNow}
-                isCompressing={isCompressing}
-                mode={mode}
-                onModeChange={setMode}
-              />
-            )}
+              {/* Input */}
+              {activeConv && (
+                <InputBar
+                  onSend={handleSend}
+                  onStop={handleStop}
+                  disabled={isStreaming}
+                  messages={activeConv.messages}
+                  maxTokens={selectedModel?.params?.maxTokens}
+                  compressionEnabled={compressionEnabled}
+                  onToggleCompression={handleToggleCompression}
+                  onCompressNow={handleCompressNow}
+                  isCompressing={isCompressing}
+                  mode={mode}
+                  onModeChange={setMode}
+                />
+              )}
+            </div>
           </div>
+
+          {/* ── Settings Overlay (covers entire window) ── */}
+          {settingsOpen && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 200,
+                display: "flex",
+                flexDirection: "column",
+                backgroundColor: "#0f0f11",
+                animation: "fadeIn 0.2s ease",
+              }}
+            >
+              <style>{`
+                @keyframes fadeIn {
+                  from { opacity: 0; }
+                  to { opacity: 1; }
+                }
+              `}</style>
+              <SettingsPanel onBack={() => setSettingsOpen(false)} />
+            </div>
+          )}
+
+          {/* ── Modules/KB Overlay ── */}
+          {modulesOpen && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 200,
+                display: "flex",
+                flexDirection: "column",
+                backgroundColor: "#0f0f11",
+                animation: "fadeIn 0.2s ease",
+              }}
+            >
+              <ModulesPanel onBack={() => setModulesOpen(false)} />
+            </div>
+          )}
         </div>
-
-        {/* ── Settings Overlay (covers entire window) ── */}
-        {settingsOpen && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              zIndex: 200,
-              display: "flex",
-              flexDirection: "column",
-              backgroundColor: "#0f0f11",
-              animation: "fadeIn 0.2s ease",
-            }}
-          >
-            <style>{`
-              @keyframes fadeIn {
-                from { opacity: 0; }
-                to { opacity: 1; }
-              }
-            `}</style>
-            <SettingsPanel onBack={() => setSettingsOpen(false)} />
-          </div>
-        )}
-
-        {/* ── Modules/KB Overlay ── */}
-        {modulesOpen && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              zIndex: 200,
-              display: "flex",
-              flexDirection: "column",
-              backgroundColor: "#0f0f11",
-              animation: "fadeIn 0.2s ease",
-            }}
-          >
-            <ModulesPanel onBack={() => setModulesOpen(false)} />
-          </div>
-        )}
       </div>
 
-      {/* ── Yolo Panel (full-window overlay) ── */}
-      {panelMode === "Yolo" && (
-        <YoloPanel onBack={() => setPanelMode("Default")} />
-      )}
+      {/* ── Yolo Panel (always mounted, opacity controlled) ── */}
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        opacity: yoloOpacity,
+        transition: "opacity 0.4s ease 0.05s",
+        pointerEvents: yoloOpacity > 0.5 ? "auto" : "none",
+      }}>
+        <YoloPanel key={panelMode === "Yolo" ? yoloEntryKey : 0} onBack={() => setPanelMode("Default")} />
+      </div>
+
+      {/* ── Blur transition overlay ── */}
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 999,
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)",
+        backgroundColor: "rgba(8, 8, 12, 0.75)",
+        opacity: blurOpacity,
+        transition: "opacity 0.3s ease",
+        pointerEvents: "none",
+      }} />
     </div>
   );
 }
@@ -929,11 +1017,12 @@ function MainContent() {
 // ─── Root component — providers wrap the inner content ────────────
 export default function App() {
   const { locale } = useTheme();
+  const [panelMode, setPanelMode] = useState<PanelMode>("Default");
   return (
     <LockProvider>
     <ModelProvider>
-      <MainContent />
-      <LockOverlay locale={locale} />
+      <MainContent panelMode={panelMode} setPanelMode={setPanelMode} />
+      <LockOverlay locale={locale} yolo={panelMode === "Yolo"} />
     </ModelProvider>
     </LockProvider>
   );

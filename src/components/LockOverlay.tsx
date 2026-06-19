@@ -1,17 +1,21 @@
 import { useState, useEffect, useRef } from "react";
 import type { Locale } from "../i18n";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import AuroraBackground from "./AuroraBackground";
 import AuroraLogo from "./AuroraLogo";
 import { useLock } from "../contexts/LockContext";
 import { MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon } from "../constants/windowIcons";
 
 interface Props {
   locale: Locale;
+  /** Yolo 模式皮肤 — 显示极光玻璃风格的锁定界面 */
+  yolo?: boolean;
 }
 
-export default function LockOverlay({ locale }: Props) {
+export default function LockOverlay({ locale, yolo }: Props) {
   const { isLocked, unlock } = useLock();
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -100,7 +104,7 @@ export default function LockOverlay({ locale }: Props) {
         position: "fixed",
         inset: 0,
         zIndex: 9999,
-        backgroundColor: "#0a0a0c",
+        backgroundColor: yolo ? "transparent" : "#0a0a0c",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -108,10 +112,15 @@ export default function LockOverlay({ locale }: Props) {
         // ---- Show/hide via CSS only, no DOM removal ----
         opacity: isLocked ? 1 : 0,
         pointerEvents: isLocked ? "auto" : "none",
-        transition: "opacity 0.25s ease",
+        transition: "opacity 0.3s ease",
         willChange: "opacity",
       }}
     >
+      <style>{`
+        .lock-pw-input::placeholder { color: ${yolo ? "rgba(255,255,255,0.4)" : "#5a5a5e"} !important; }
+      `}</style>
+      {/* Yolo mode: animated aurora background behind the lock card */}
+      {yolo && <AuroraBackground />}
       {/* Window controls — drawn directly on the overlay */}
       <div
         data-tauri-drag-region
@@ -212,17 +221,27 @@ export default function LockOverlay({ locale }: Props) {
           alignItems: "center",
           justifyContent: "center",
           gap: "28px",
+          ...(yolo ? {
+            position: "relative",
+            zIndex: 1,
+            padding: "40px 48px",
+          } : {}),
         }}
       >
-        {/* Logo */}
-        <AuroraLogo size={80} rounded={16} />
+        {/* Logo — add glow in yolo mode */}
+        <div style={yolo ? {
+          filter: "drop-shadow(0 0 20px rgba(100,180,255,0.25)) drop-shadow(0 0 40px rgba(80,120,255,0.1))",
+          transition: "filter 0.5s ease",
+        } : {}}>
+          <AuroraLogo size={80} rounded={16} />
+        </div>
 
         {/* Title */}
         <div
           style={{
             fontSize: "18px",
             fontWeight: 500,
-            color: "#6a6a6e",
+            color: yolo ? "rgba(255,255,255,0.55)" : "#6a6a6e",
             letterSpacing: "2px",
           }}
         >
@@ -238,38 +257,79 @@ export default function LockOverlay({ locale }: Props) {
             alignItems: "center",
           }}
         >
-          <input
-            ref={inputRef}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              locale === "zh-CN" ? "输入密码解锁" : "Enter password to unlock"
-            }
-            style={{
-              width: "280px",
-              padding: "12px 16px",
-              borderRadius: "10px",
-              border: `1px solid ${error ? "#ef4444" : "#2a2a2e"}`,
-              backgroundColor: "#141417",
-              color: "#e0e0e0",
-              fontSize: "15px",
-              fontFamily: "inherit",
-              outline: "none",
-              textAlign: "center",
-              transition: "border-color 0.15s, box-shadow 0.15s",
-              boxShadow: error ? "0 0 0 2px rgba(239, 68, 68, 0.2)" : "none",
-              animation: error ? "shake 0.4s ease" : undefined,
-            }}
-            onFocus={(e) => {
-              if (!error) e.currentTarget.style.borderColor = "#2563eb";
-            }}
-            onBlur={(e) => {
-              if (!error) e.currentTarget.style.borderColor = "#2a2a2e";
-            }}
-            disabled={unlocking}
-          />
+          <div style={{ position: "relative", width: "280px" }}>
+            <input
+              ref={inputRef}
+              className="lock-pw-input"
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                locale === "zh-CN" ? "输入密码解锁" : "Enter password to unlock"
+              }
+              style={{
+                width: "100%",
+                padding: "12px 42px 12px 16px",
+                borderRadius: "10px",
+                border: `1px solid ${error ? "#ef4444" : yolo ? "rgba(255,255,255,0.12)" : "#2a2a2e"}`,
+                backgroundColor: yolo ? "rgba(255,255,255,0.04)" : "#141417",
+                color: "#e0e0e0",
+                fontSize: "15px",
+                fontFamily: "inherit",
+                outline: "none",
+                textAlign: "center",
+                transition: "border-color 0.15s, box-shadow 0.15s",
+                boxShadow: error ? "0 0 0 2px rgba(239, 68, 68, 0.2)" : yolo ? "0 0 20px rgba(50,150,255,0.05)" : "none",
+                animation: error ? "shake 0.4s ease" : undefined,
+                ...(yolo ? { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" } : {}),
+              }}
+              onFocus={(e) => {
+                if (!error) e.currentTarget.style.borderColor = yolo ? "rgba(100,180,255,0.5)" : "#2563eb";
+              }}
+              onBlur={(e) => {
+                if (!error) e.currentTarget.style.borderColor = yolo ? "rgba(255,255,255,0.12)" : "#2a2a2e";
+              }}
+              disabled={unlocking}
+            />
+            {/* Eye toggle button */}
+            <button
+              onClick={() => setShowPassword((v) => !v)}
+              tabIndex={-1}
+              style={{
+                position: "absolute",
+                right: "10px",
+                top: "50%",
+                transform: "translateY(-50%)",
+                width: "28px",
+                height: "28px",
+                borderRadius: "6px",
+                border: "none",
+                background: "transparent",
+                color: yolo ? "rgba(255,255,255,0.6)" : "#e0e0e0",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#fff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.6)" : "#e0e0e0"; }}
+            >
+              {showPassword ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              )}
+            </button>
+          </div>
 
           {/* Unlock button */}
           <button
@@ -279,9 +339,9 @@ export default function LockOverlay({ locale }: Props) {
               width: "280px",
               padding: "10px 0",
               borderRadius: "10px",
-              border: "none",
-              backgroundColor: password && !unlocking ? "#2563eb" : "#1a1a1e",
-              color: password && !unlocking ? "#fff" : "#5a5a5e",
+              border: yolo ? "1px solid rgba(59,130,246,0.25)" : "none",
+              backgroundColor: password && !unlocking ? (yolo ? "rgba(37,99,235,0.55)" : "#2563eb") : (yolo ? "rgba(255,255,255,0.04)" : "#1a1a1e"),
+              color: password && !unlocking ? "#fff" : (yolo ? "rgba(255,255,255,0.3)" : "#5a5a5e"),
               fontSize: "14px",
               fontWeight: 600,
               cursor: password && !unlocking ? "pointer" : "default",

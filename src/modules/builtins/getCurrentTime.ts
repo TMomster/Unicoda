@@ -1,7 +1,7 @@
 /**
  * 获取当前时间模组。
  *
- * 等级：low（所有模式可用）
+ * 等级：normal（普通模组，所有模式可用）
  * 参数：
  *   format - 输出格式（可选），"full"（完整日期时间，默认）| "date"（仅日期）| "time"（仅时间）
  *
@@ -40,7 +40,7 @@ const mod: Module = {
   name: "获取当前时间",
   description:
     "获取当前系统日期和时间，包括星期和时区信息。当你需要知道今天的确切日期来搜索最新新闻、或判断时间基准时使用。",
-  level: "low",
+  level: "normal",
   parameters: [
     {
       name: "format",
