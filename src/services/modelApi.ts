@@ -104,16 +104,26 @@ export async function* streamChatCompletion(
   const response = await fetch(url, fetchOpts);
 
   if (!response.ok) {
-    let errorText = "";
+    let errorBody = "";
     try {
-      errorText = await response.text();
+      errorBody = await response.text();
     } catch {
       /* skip */
     }
-    // 脱敏：截断过长错误响应（可能包含 API Key 痕迹）
-    const safe = errorText.length > 500 ? errorText.slice(0, 500) + "..." : errorText;
+    // 尝试从 JSON 错误体中提取简洁的 error.message（如 "Insufficient Balance"）
+    let cleanMessage = "";
+    try {
+      const parsed = JSON.parse(errorBody);
+      cleanMessage = parsed.error?.message || parsed.error || "";
+    } catch {
+      /* not JSON */
+    }
+    if (!cleanMessage) {
+      // 脱敏：截断过长错误响应（可能包含 API Key 痕迹）
+      cleanMessage = errorBody.length > 500 ? errorBody.slice(0, 500) + "..." : errorBody;
+    }
     throw new Error(
-      `API error ${response.status}: ${safe || response.statusText}`,
+      `[API_ERROR:${response.status}]${cleanMessage || response.statusText}`,
     );
   }
 

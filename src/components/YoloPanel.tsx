@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { Conversation, Message, Mode, FileAttachment } from "../types";
 import { useTheme } from "../contexts/ThemeContext";
@@ -483,6 +485,56 @@ export default function YoloPanel({ onBack }: Props) {
   const [compressionEnabled, setCompressionEnabled] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
 
+  // ── Drag-and-drop file upload (Tauri native) ───────
+  const [dragOver, setDragOver] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<FileAttachment[]>([]);
+  const isStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    isStreamingRef.current = isStreaming;
+  });
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+        const p = event.payload;
+        if (p.type === "enter" || p.type === "over") {
+          setDragOver(true);
+        } else if (p.type === "leave") {
+          setDragOver(false);
+        } else if (p.type === "drop") {
+          setDragOver(false);
+          if (isStreamingRef.current) return;
+          interface FileContent { data: string; mime_type: string; is_image: boolean; size: number; name: string; }
+          const allowed: FileAttachment[] = [];
+          for (const filePath of p.paths) {
+            try {
+              const content: FileContent = await invoke("read_file_content", { path: filePath });
+              if (content.is_image) continue;
+              if (content.size > 10 * 1024 * 1024) continue;
+              allowed.push({
+                id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                name: content.name,
+                size: content.size,
+                mimeType: content.mime_type,
+                data: content.data,
+                isImage: content.is_image,
+              });
+            } catch { /* skip failed reads */ }
+          }
+          if (allowed.length > 0) {
+            setPendingFiles((prev) => [...prev, ...allowed]);
+          }
+        }
+      });
+    })();
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  const handleRemovePendingFile = useCallback((fileId: string) => {
+    setPendingFiles((prev) => prev.filter((f) => f.id !== fileId));
+  }, []);
+
   const openSettings = useCallback(() => {
     setSettingsOpen(true);
     setSettingsAnim("enter");
@@ -635,6 +687,45 @@ export default function YoloPanel({ onBack }: Props) {
     }
   }
 
+  // ── 自动标题生成 ─────────────────────────────────
+  async function generateConversationTitle(
+    model: import("../types").ModelConfig,
+    userContent: string,
+    assistantContent: string,
+    convId: string,
+  ) {
+    const titlePrompt = [
+      '根据以下对话内容，用3-6个字生成本次对话的简洁标题（不要使用引号或多余文字，仅返回标题本身）：',
+      '',
+      '用户：' + userContent.slice(0, 500),
+      '助手：' + assistantContent.slice(0, 500),
+    ].join('\n');
+    const messages = [{ role: 'user' as const, content: titlePrompt }];
+    try {
+      let fullTitle = '';
+      for await (const chunk of streamChatCompletion(model, messages)) {
+        fullTitle += chunk.content;
+      }
+      const trimmed = fullTitle.replace(/[""""']/g, '').trim();
+      if (trimmed) {
+        updateConv(convId, (c) => ({
+          ...c,
+          title: trimmed.length > 30 ? trimmed.slice(0, 30) + '...' : trimmed,
+          autoTitleDone: true,
+          updatedAt: Date.now(),
+        }));
+      } else {
+        updateConv(convId, (c) => ({ ...c, autoTitleDone: true, updatedAt: Date.now() }));
+      }
+    } catch {
+      updateConv(convId, (c) => ({ ...c, autoTitleDone: true, updatedAt: Date.now() }));
+    }
+    // 持久化到文件（setTimeout 0 等待 state 更新后再读 ref）
+    setTimeout(() => {
+      flushConversations(conversationsRef.current, sessionPathRef.current);
+    }, 0);
+  }
+
   const handleSend = useCallback(async (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
     if (!activeId || !selectedModel) return;
     const currentMode = sendMode ?? mode;
@@ -642,6 +733,12 @@ export default function YoloPanel({ onBack }: Props) {
     const userMsg: Message = { id: String(nextMsgId++), role: "user", content: text, timestamp: Date.now(), files };
     const currentConv = conversations.find((c) => c.id === activeId);
     const prevMessages = currentConv?.messages ?? [];
+
+    // 判断是否需要自动标题：全新会话（无消息）且未标记过
+    const needsAutoTitle = currentConv
+      && currentConv.messages.length === 0
+      && !currentConv.autoTitleDone;
+
     setIsStreaming(true);
     const ac = new AbortController();
     abortRef.current = ac;
@@ -655,7 +752,10 @@ export default function YoloPanel({ onBack }: Props) {
           updateConv(activeId, (c) => ({ ...c, messages: c.messages.map((m) => m.id === lastStreaming ? { ...m, streaming: false } : m), updatedAt: Date.now() }));
         } else {
           const errorMsg = err instanceof Error ? err.message : String(err);
-          updateConv(activeId, (c) => ({ ...c, messages: c.messages.map((m) => m.id === lastStreaming ? { ...m, content: `**Error:** ${errorMsg}`, streaming: false } : m), updatedAt: Date.now() }));
+          const displayContent = errorMsg.startsWith("[API_ERROR:")
+            ? errorMsg
+            : `**Error:** ${errorMsg}`;
+          updateConv(activeId, (c) => ({ ...c, messages: c.messages.map((m) => m.id === lastStreaming ? { ...m, content: displayContent, streaming: false } : m), updatedAt: Date.now() }));
         }
       }
     } finally {
@@ -663,6 +763,20 @@ export default function YoloPanel({ onBack }: Props) {
       streamingMsgIdRef.current = null;
       abortRef.current = null;
       setTimeout(() => flushConversations(conversationsRef.current, sessionPathRef.current), 0);
+
+      // 流式完成后，如需自动标题则调用模型生成
+      if (needsAutoTitle && selectedModel) {
+        setTimeout(() => {
+          const conv = conversationsRef.current.find((c) => c.id === activeId);
+          if (conv) {
+            const assistantMsgs = conv.messages.filter((m) => m.role === 'assistant');
+            const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
+            if (lastAssistant && lastAssistant.content) {
+              generateConversationTitle(selectedModel, text, lastAssistant.content, activeId);
+            }
+          }
+        }, 0);
+      }
     }
   }, [activeId, selectedModel, conversations, updateConv, mode]);
 
@@ -677,7 +791,8 @@ export default function YoloPanel({ onBack }: Props) {
   }, [setSessionPath]);
 
   return (
-    <div style={{
+    <div
+      style={{
       position: "fixed", inset: 0, zIndex: 1000,
       display: "flex", flexDirection: "column", fontFamily,
     }}>
@@ -733,7 +848,7 @@ export default function YoloPanel({ onBack }: Props) {
                 )}
               </div>
               {activeConv && (
-                <InputBar onSend={handleSend} onStop={handleStop} disabled={isStreaming} messages={activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={compressionEnabled} onToggleCompression={handleToggleCompression} onCompressNow={handleCompressNow} isCompressing={isCompressing} mode={mode} onModeChange={setMode} yolo />
+                <InputBar onSend={handleSend} onStop={handleStop} disabled={isStreaming} messages={activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={compressionEnabled} onToggleCompression={handleToggleCompression} onCompressNow={handleCompressNow} isCompressing={isCompressing} mode={mode} onModeChange={setMode} yolo pendingFiles={pendingFiles} onRemovePendingFile={handleRemovePendingFile} onClearPendingFiles={() => setPendingFiles([])} dragOver={dragOver} />
               )}
             </div>
           </div>
@@ -750,6 +865,7 @@ export default function YoloPanel({ onBack }: Props) {
         </div>
       )}
       <FilePreviewPanel file={previewFile} onClose={() => setPreviewFile(null)} />
+
     </div>
   );
 }

@@ -474,6 +474,220 @@ fn load_file_from_path(dir: String, filename: String) -> Result<String, String> 
     std::fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
+// ─── 文件系统只读操作 ────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct DirEntry {
+    name: String,
+    is_dir: bool,
+    is_file: bool,
+    size: u64,
+    modified: String,
+}
+
+/// 列出目录内容，按"目录优先 + 字母序"排序返回。
+#[tauri::command]
+fn list_directory(path: String) -> Result<Vec<DirEntry>, String> {
+    let dir = std::path::Path::new(&path);
+    if !dir.exists() {
+        return Err(format!("目录不存在: {}", path));
+    }
+    if !dir.is_dir() {
+        return Err(format!("不是目录: {}", path));
+    }
+
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_default();
+
+        entries.push(DirEntry {
+            name: entry.file_name().to_string_lossy().to_string(),
+            is_dir: metadata.is_dir(),
+            is_file: metadata.is_file(),
+            size: metadata.len(),
+            modified,
+        });
+    }
+
+    // 目录优先，再按字母序
+    entries.sort_by(|a, b| {
+        if a.is_dir != b.is_dir {
+            return b.is_dir.cmp(&a.is_dir);
+        }
+        a.name.to_lowercase().cmp(&b.name.to_lowercase())
+    });
+
+    Ok(entries)
+}
+
+#[derive(serde::Serialize)]
+struct PathMetadata {
+    exists: bool,
+    is_dir: bool,
+    is_file: bool,
+    size: u64,
+    modified: String,
+    name: String,
+    parent: Option<String>,
+    canonical_path: String,
+}
+
+/// 获取路径的元信息（存在与否、类型、大小、修改时间、规范路径）。
+#[tauri::command]
+fn get_path_metadata(path: String) -> Result<PathMetadata, String> {
+    let p = std::path::Path::new(&path);
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    let parent = p.parent().map(|p| p.to_string_lossy().to_string());
+    let canonical = std::fs::canonicalize(&p).unwrap_or_else(|_| p.to_path_buf());
+
+    if !p.exists() {
+        return Ok(PathMetadata {
+            exists: false,
+            is_dir: false,
+            is_file: false,
+            size: 0,
+            modified: String::new(),
+            name,
+            parent,
+            canonical_path: canonical.to_string_lossy().to_string(),
+        });
+    }
+
+    let metadata = p.metadata().map_err(|e| e.to_string())?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default();
+
+    Ok(PathMetadata {
+        exists: true,
+        is_dir: metadata.is_dir(),
+        is_file: metadata.is_file(),
+        size: metadata.len(),
+        modified,
+        name,
+        parent,
+        canonical_path: canonical.to_string_lossy().to_string(),
+    })
+}
+
+/// 读取文本文件内容，可选最大字符限制。
+#[tauri::command]
+fn read_text_file_at(path: String, max_bytes: Option<u64>) -> Result<String, String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+    if !p.is_file() {
+        return Err(format!("不是文件: {}", path));
+    }
+
+    let content = std::fs::read_to_string(p)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+
+    if let Some(max) = max_bytes {
+        if (content.len() as u64) > max {
+            let mut truncated = content[..max as usize].to_string();
+            truncated.push_str("\n\n... [内容过长，已截断]");
+            return Ok(truncated);
+        }
+    }
+
+    Ok(content)
+}
+
+/// 获取用户主目录路径。
+#[tauri::command]
+fn get_home_directory(app_handle: tauri::AppHandle) -> Result<String, String> {
+    app_handle
+        .path()
+        .home_dir()
+        .map_err(|e| e.to_string())
+        .map(|p| p.to_string_lossy().to_string())
+}
+
+// ─── 拖拽文件读取命令 ────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct FileContent {
+    data: String,
+    mime_type: String,
+    is_image: bool,
+    size: u64,
+    name: String,
+}
+
+/// 读取拖拽丢入的文件内容。图片返回 base64 Data URL，文本返回 UTF-8 字符串。
+#[tauri::command]
+fn read_file_content(path: String) -> Result<FileContent, String> {
+    use std::path::Path;
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+    if !p.is_file() {
+        return Err(format!("不是文件: {}", path));
+    }
+
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    let size = p.metadata().map_err(|e| e.to_string())?.len();
+
+    let mime_type = match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "tiff" | "tif" => "image/tiff",
+        _ => "application/octet-stream",
+    };
+    let is_image = mime_type.starts_with("image/");
+
+    if is_image {
+        let bytes = std::fs::read(p).map_err(|e| format!("读取文件失败: {}", e))?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(FileContent {
+            data: format!("data:{};base64,{}", mime_type, encoded),
+            mime_type: mime_type.to_string(),
+            is_image: true,
+            size,
+            name,
+        })
+    } else {
+        let text = std::fs::read_to_string(p).map_err(|e| format!("读取文件失败: {}", e))?;
+        Ok(FileContent {
+            data: text,
+            mime_type: "text/plain".to_string(),
+            is_image: false,
+            size,
+            name,
+        })
+    }
+}
+
 // ─── Credential Manager Commands ───────────────────────────────────────
 
 #[tauri::command]
@@ -503,11 +717,16 @@ pub fn run() {
             get_config_dir_path,
             save_file_at_path,
             load_file_from_path,
+            list_directory,
+            get_path_metadata,
+            read_text_file_at,
+            get_home_directory,
             save_credential,
             load_credential,
             delete_credential,
             clear_search_cookies,
             get_cookie_info,
+            read_file_content,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

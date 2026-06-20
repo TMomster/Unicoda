@@ -134,6 +134,23 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
   const reasoningInProgress = isStreaming && !message.reasoningEndTime;
   const reasoningTitle = `${reasoningInProgress ? t("reasoningInProgress") : t("reasoning")}（${elapsed}s）`;
 
+  // ── API 错误检测（红色面板） ──
+  const apiErrorMatch = !isUser && !isTool ? message.content.match(/^\[API_ERROR:(\d+)\](.*)/) : null;
+
+  // 常见 API 错误消息 → 中文对照（面板正文显示中文）
+  const ERROR_MESSAGE_ZH: Record<string, string> = {
+    "Insufficient Balance": "余额不足",
+    "Invalid API key": "API 密钥无效",
+    "Rate limit exceeded": "请求频率超限",
+    "Context length exceeded": "超出上下文长度限制",
+    "Model not found": "模型不存在或不可用",
+    "Authentication error": "认证失败",
+    "Bad gateway": "网关错误",
+    "Service unavailable": "服务暂不可用",
+    "Gateway timeout": "网关超时",
+  };
+  const errorBodyZh = apiErrorMatch ? (ERROR_MESSAGE_ZH[apiErrorMatch[2]] || apiErrorMatch[2]) : "";
+
   return (
     <div
       style={{
@@ -407,6 +424,63 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               {message.content && (
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
                   <CopyBtn text={message.content} yolo={yolo} />
+                </div>
+              )}
+            </div>
+          ) : apiErrorMatch ? (
+            <div>
+              {/* 红色 API 错误面板 */}
+              <div
+                style={{
+                  borderRadius: "8px",
+                  border: `1px solid ${yolo ? "rgba(239,68,68,0.4)" : "#ef44444a"}`,
+                  background: yolo ? "rgba(239,68,68,0.06)" : "#1c1010",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "10px 14px",
+                    background: yolo ? "rgba(239,68,68,0.1)" : "#2c1010",
+                    borderBottom: `1px solid ${yolo ? "rgba(239,68,68,0.2)" : "#3c2020"}`,
+                    userSelect: "none",
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#ef4444" }}>
+                    {(() => {
+                      const status = parseInt(apiErrorMatch[1], 10);
+                      if (status === 402) return "API 请求被拒绝";
+                      if (status === 401) return "API 密钥无效";
+                      if (status === 429) return "请求频率过高";
+                      return `API 错误 (${status})`;
+                    })()}
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  <span style={{ fontSize: "10px", color: yolo ? "rgba(255,255,255,0.25)" : "#a06060" }}>
+                    {apiErrorMatch[1]}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    fontSize: "12px",
+                    lineHeight: 1.6,
+                    color: yolo ? "rgba(255,255,255,0.6)" : "#fca5a5",
+                    userSelect: "text",
+                  }}
+                >
+                  {errorBodyZh}
+                </div>
+              </div>
+              {!isStreaming && (
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                  <CopyBtn text={errorBodyZh} yolo={yolo} />
                 </div>
               )}
             </div>

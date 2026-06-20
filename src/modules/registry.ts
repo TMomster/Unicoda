@@ -28,4 +28,5 @@ export function initBuiltinModules(): void {
   import("./builtins/webSearch");
   import("./builtins/fetchPage");
   import("./builtins/summaryPage");
+  import("./builtins/readFromFiles");
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useModels } from "../contexts/ModelContext";
 import type { FileAttachment, Message, Mode } from "../types";
@@ -132,7 +132,7 @@ function usageColor(pct: number): string {
 }
 
 interface Props {
-  onSend: (text: string, mode?: Mode, files?: FileAttachment[]) => void;
+  onSend: (text: string, mode?: Mode, files?: FileAttachment[]) => void | Promise<void>;
   onStop: () => void;
   disabled: boolean;
   /** 上下文容量 + 压缩控制 */
@@ -146,13 +146,70 @@ interface Props {
   onModeChange: (mode: Mode) => void;
   /** Yolo 玻璃模式样式 */
   yolo?: boolean;
+  /** Tauri 原生拖拽传入的待发送文件（框架级别） */
+  pendingFiles?: FileAttachment[];
+  onRemovePendingFile?: (id: string) => void;
+  onClearPendingFiles?: () => void;
+  /**
+   * 拖拽覆盖层显示状态（来自父组件的 Tauri 原生 onDragDropEvent，
+   * 因为 HTML5 拖拽事件在 Tauri v2 WebView2 上会被抑制，
+   * 所以由父组件传入此状态来控制输入框遮罩层）
+   */
+  dragOver?: boolean;
 }
 
-const LINE_HEIGHT_PX = 21;  // 14px font * 1.5 line-height
+const LINE_HEIGHT_PX = 21; // 14px font * 1.5 line-height
 const MAX_NORMAL_LINES = 5;
 const MAX_NORMAL_HEIGHT = MAX_NORMAL_LINES * LINE_HEIGHT_PX + 8;  // +8 for vertical padding
 
-export default function InputBar({ onSend, onStop, disabled, messages, maxTokens, compressionEnabled, onToggleCompression, onCompressNow, isCompressing, mode, onModeChange, yolo }: Props) {
+/** 文件标签（候选区中的单个文件 chip） */
+function FileChip({ file, yolo, onRemove }: { file: FileAttachment; yolo?: boolean; onRemove: (id: string) => void }) {
+  return (
+    <div
+      style={{
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "4px 8px", borderRadius: "6px",
+        backgroundColor: yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg3)",
+        border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid var(--c-bd2)",
+        fontSize: "12px", color: "var(--c-t2)", maxWidth: "200px",
+      }}
+      title={file.name}
+    >
+      {file.isImage ? (
+        <img src={file.data} alt="" style={{ width: "16px", height: "16px", borderRadius: "2px", objectFit: "cover", flexShrink: 0 }} />
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0, color: "#60a5fa" }}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+        </svg>
+      )}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+        {file.name}
+      </span>
+      <button
+        onClick={() => onRemove(file.id)}
+        title="移除"
+        style={{
+          width: "16px", height: "16px", borderRadius: "3px",
+          border: "none", background: "transparent",
+          color: "var(--c-t5)", cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 0, flexShrink: 0,
+          transition: "color 0.12s",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--c-t5)"; }}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+export default function InputBar({ onSend, onStop, disabled, messages, maxTokens, compressionEnabled, onToggleCompression, onCompressNow, isCompressing, mode, onModeChange, yolo, pendingFiles, onRemovePendingFile, onClearPendingFiles, dragOver: dragOverProp }: Props) {
   const { t } = useTheme();
   const { models, selectedModelId, setSelectedModelId } = useModels();
   const [text, setText] = useState("");
@@ -239,11 +296,23 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
 
   const handleSend = () => {
     const trimmed = text.trim();
-    if ((!trimmed && candidateFiles.length === 0) || disabled) return;
-    onSend(trimmed, mode, candidateFiles.length > 0 ? candidateFiles : undefined);
+    // 合并时按文件名+大小去重，避免同一文件通过不同路径同时出现在两个数组中
+    const seen = new Set<string>();
+    const allFiles: FileAttachment[] = [];
+    for (const file of candidateFiles) {
+      const key = file.name + '_' + file.size;
+      if (!seen.has(key)) { seen.add(key); allFiles.push(file); }
+    }
+    for (const file of pendingFiles || []) {
+      const key = file.name + '_' + file.size;
+      if (!seen.has(key)) { seen.add(key); allFiles.push(file); }
+    }
+    if ((!trimmed && allFiles.length === 0) || disabled) return;
+    onSend(trimmed, mode, allFiles.length > 0 ? allFiles : undefined);
     setText("");
     setExpanded(false);
     setCandidateFiles([]);
+    onClearPendingFiles?.();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -269,17 +338,13 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
     }
   };
 
-  // ── 文件读取与拖拽上传 ──────────────────────────
-  const selectedModel_ = models.find((m) => m.id === selectedModelId);
-  const modelAllowsFileUpload = !!selectedModel_?.params?.allowFileUpload;
-
+  // ── 文件读取与上传（框架级别，不限模型配置） ──
   const addFilesToCandidates = async (files: FileList | File[]) => {
     const fileArray = Array.from(files);
     const allowed: FileAttachment[] = [];
     for (const file of fileArray) {
       // 跳过图片文件
       if (file.type.startsWith("image/")) continue;
-      if (!modelAllowsFileUpload) continue;
       // 限制 10MB 大小
       if (file.size > 10 * 1024 * 1024) continue;
       try {
@@ -320,11 +385,8 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
     e.stopPropagation();
     setDragOver(false);
     dragCounterRef.current = 0;
-    if (disabled) return;
-    if (!modelAllowsFileUpload) return;
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      addFilesToCandidates(e.dataTransfer.files);
-    }
+    // 注意：文件处理由 Tauri 原生 onDragDropEvent 在顶层完成
+    // 此处不再处理 HTML5 拖放的文件，避免与 pendingFiles 重复
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -334,9 +396,16 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
     }
   };
 
-  const removeCandidateFile = (fileId: string) => {
-    setCandidateFiles((prev) => prev.filter((f) => f.id !== fileId));
-  };
+  /** 按文件名+大小从两个数组（candidateFiles + pendingFiles）中同时删除所有匹配项 */
+  const removeFileByKey = useCallback((name: string, size: number) => {
+    const key = name + '_' + size;
+    setCandidateFiles((prev) => prev.filter((f) => f.name + '_' + f.size !== key));
+    if (pendingFiles && onRemovePendingFile) {
+      pendingFiles
+        .filter((f) => f.name + '_' + f.size === key)
+        .forEach((f) => onRemovePendingFile(f.id));
+    }
+  }, [pendingFiles, onRemovePendingFile]);
 
   const closeAll = () => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -375,7 +444,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
       <input ref={fileInputRef} type="file" multiple
         onChange={handleFileInputChange}
         style={{ display: "none" }}
-        accept={modelAllowsFileUpload ? "*/*" : undefined} />
+        accept="*/*" />
       <div
         style={{
           maxWidth: "720px",
@@ -383,76 +452,28 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
           position: "relative",
         }}
       >
-        {/* 拖拽遮罩层 */}
-        {dragOver && (
-          <div
-            style={{
-              position: "absolute", inset: 0, zIndex: 50,
-              borderRadius: "14px",
-              border: "2px dashed #3b82f6",
-              backgroundColor: yolo ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.06)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: "14px", color: "#60a5fa", fontWeight: 600,
-              backdropFilter: yolo ? "blur(4px)" : undefined,
-              WebkitBackdropFilter: yolo ? "blur(4px)" : undefined,
-              pointerEvents: "none",
-            }}
-          >
-            {modelAllowsFileUpload ? "释放文件以上传" : "当前模型未启用文件上传"}
-          </div>
-        )}
-
-        {/* 文件候选区 */}
-        {candidateFiles.length > 0 && (
+        {/* 文件候选区（合并 InputBar 自有候选 + Tauri 拖拽候选，按文件名+大小去重） */}
+        {(candidateFiles.length > 0 || (pendingFiles && pendingFiles.length > 0)) && (
           <div
             style={{
               display: "flex", flexWrap: "wrap", gap: "6px",
               marginBottom: "8px", padding: "4px 0",
             }}
           >
-            {candidateFiles.map((file) => (
-              <div
-                key={file.id}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: "4px",
-                  padding: "4px 8px", borderRadius: "6px",
-                  backgroundColor: yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg3)",
-                  border: yolo ? "1px solid rgba(255,255,255,0.1)" : "1px solid var(--c-bd2)",
-                  fontSize: "12px", color: "var(--c-t2)", maxWidth: "200px",
-                }}
-                title={file.name}
-              >
-                {file.isImage ? (
-                  <img src={file.data} alt="" style={{ width: "16px", height: "16px", borderRadius: "2px", objectFit: "cover", flexShrink: 0 }} />
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0, color: "#60a5fa" }}>
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                  </svg>
-                )}
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                  {file.name}
-                </span>
-                <button
-                  onClick={() => removeCandidateFile(file.id)}
-                  title="移除"
-                  style={{
-                    width: "16px", height: "16px", borderRadius: "3px",
-                    border: "none", background: "transparent",
-                    color: "var(--c-t5)", cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    padding: 0, flexShrink: 0,
-                    transition: "color 0.12s",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--c-t5)"; }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
+            {(() => {
+              const seen = new Set<string>();
+              const chips: FileAttachment[] = [];
+              for (const file of candidateFiles) {
+                const key = file.name + '_' + file.size;
+                if (!seen.has(key)) { seen.add(key); chips.push(file); }
+              }
+              for (const file of pendingFiles || []) {
+                const key = file.name + '_' + file.size;
+                if (!seen.has(key)) { seen.add(key); chips.push(file); }
+              }
+              return chips;
+            })().map((file) => (
+              <FileChip key={file.id} file={file} yolo={yolo} onRemove={() => removeFileByKey(file.name, file.size)} />
             ))}
           </div>
         )}
@@ -471,6 +492,25 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
               : { boxShadow: "none" }),
           }}
         >
+          {/* 拖拽覆盖层（位于输入框容器上层） */}
+          {(dragOver || dragOverProp) && (
+            <div
+              style={{
+                position: "absolute", inset: 0, zIndex: 50,
+                borderRadius: "14px",
+                border: "2px dashed #3b82f6",
+                backgroundColor: yolo ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.06)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "14px", color: "#60a5fa", fontWeight: 600,
+                backdropFilter: yolo ? "blur(4px)" : undefined,
+                WebkitBackdropFilter: yolo ? "blur(4px)" : undefined,
+                pointerEvents: "none",
+              }}
+            >
+              {"仅支持上传文本文件"}
+            </div>
+          )}
+
           {/* Expand / Collapse button */}
           <button
             onClick={() => setExpanded((v) => !v)}

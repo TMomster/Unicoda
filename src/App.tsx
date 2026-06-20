@@ -1,5 +1,7 @@
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { Conversation, FileAttachment, Message, Mode, PanelMode } from "./types";
+import type { Conversation, FileAttachment, Message, Mode, PanelMode, ModelConfig } from "./types";
 import { useTheme, scaleToTransform } from "./contexts/ThemeContext";
 import { useModels } from "./contexts/ModelContext";
 import { ModelProvider } from "./contexts/ModelContext";
@@ -273,7 +275,57 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const [previewFile, setPreviewFile] = useState<FileAttachment | null>(null);
   const [mode, setMode] = useState<Mode>("Chat");
 
-  // ── Toast notification ──────────────────────────────
+  // ── Drag-and-drop file upload (Tauri native) ───────
+  const [dragOver, setDragOver] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<FileAttachment[]>([]);
+  const isStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    isStreamingRef.current = isStreaming;
+  });
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+        const p = event.payload;
+        if (p.type === "enter" || p.type === "over") {
+          setDragOver(true);
+        } else if (p.type === "leave") {
+          setDragOver(false);
+        } else if (p.type === "drop") {
+          setDragOver(false);
+          if (isStreamingRef.current) return;
+          interface FileContent { data: string; mime_type: string; is_image: boolean; size: number; name: string; }
+          const allowed: FileAttachment[] = [];
+          for (const filePath of p.paths) {
+            try {
+              const content: FileContent = await invoke("read_file_content", { path: filePath });
+              if (content.is_image) continue; // 跳过图片（与 InputBar 一致）
+              if (content.size > 10 * 1024 * 1024) continue;
+              allowed.push({
+                id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                name: content.name,
+                size: content.size,
+                mimeType: content.mime_type,
+                data: content.data,
+                isImage: content.is_image,
+              });
+            } catch { /* skip failed reads */ }
+          }
+          if (allowed.length > 0) {
+            setPendingFiles((prev) => [...prev, ...allowed]);
+          }
+        }
+      });
+    })();
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  const handleRemovePendingFile = useCallback((fileId: string) => {
+    setPendingFiles((prev) => prev.filter((f) => f.id !== fileId));
+  }, []);
+
+  // ── Toast notifications ─────────────────────────────
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = useCallback((message: string) => {
@@ -723,6 +775,48 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     }
   }
 
+  // ── 自动标题生成 ─────────────────────────────────
+  /** 使用模型根据对话内容生成一个简洁标题（仅在新会话首次对话后触发） */
+  async function generateConversationTitle(
+    model: ModelConfig,
+    userContent: string,
+    assistantContent: string,
+    convId: string,
+  ) {
+    const titlePrompt = [
+      '根据以下对话内容，用3-6个字生成本次对话的简洁标题（不要使用引号或多余文字，仅返回标题本身）：',
+      '',
+      '用户：' + userContent.slice(0, 500),
+      '助手：' + assistantContent.slice(0, 500),
+    ].join('\n');
+    const messages = [{ role: 'user' as const, content: titlePrompt }];
+    try {
+      let fullTitle = '';
+      for await (const chunk of streamChatCompletion(model, messages)) {
+        fullTitle += chunk.content;
+      }
+      const trimmed = fullTitle.replace(/[""""']/g, '').trim();
+      if (trimmed) {
+        updateConv(convId, (c) => ({
+          ...c,
+          title: trimmed.length > 30 ? trimmed.slice(0, 30) + '...' : trimmed,
+          autoTitleDone: true,
+          updatedAt: Date.now(),
+        }));
+      } else {
+        // 空结果时也标记已尝试过，避免重复触发
+        updateConv(convId, (c) => ({ ...c, autoTitleDone: true, updatedAt: Date.now() }));
+      }
+    } catch {
+      // 静默失败，不阻塞用户
+      updateConv(convId, (c) => ({ ...c, autoTitleDone: true, updatedAt: Date.now() }));
+    }
+    // 持久化到文件（setTimeout 0 等待 state 更新后再读 ref）
+    setTimeout(() => {
+      flushConversations(conversationsRef.current, sessionPathRef.current);
+    }, 0);
+  }
+
   const handleSend = useCallback(
     async (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
       if (!activeId || !selectedModel) return;
@@ -743,6 +837,11 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
       const currentConv = conversations.find((c) => c.id === activeId);
       const prevMessages = currentConv?.messages ?? [];
+
+      // 判断是否需要自动标题：全新会话（无消息）且未标记过
+      const needsAutoTitle = currentConv
+        && currentConv.messages.length === 0
+        && !currentConv.autoTitleDone;
 
       setIsStreaming(true);
       const abortController = new AbortController();
@@ -770,11 +869,15 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
           const errorMsg = err instanceof Error ? err.message : String(err);
           const lastStreaming = streamingMsgIdRef.current;
           if (lastStreaming) {
+            // 结构化 API 错误保持原样（MessageBubble 渲染为红色面板），其他错误依旧 Markdown 加粗
+            const displayContent = errorMsg.startsWith("[API_ERROR:")
+              ? errorMsg
+              : `**Error:** ${errorMsg}`;
             updateConv(activeId, (c) => ({
               ...c,
               messages: c.messages.map((msg) =>
                 msg.id === lastStreaming
-                  ? { ...msg, content: `**Error:** ${errorMsg}`, streaming: false }
+                  ? { ...msg, content: displayContent, streaming: false }
                   : msg,
               ),
               updatedAt: Date.now(),
@@ -788,6 +891,21 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         setTimeout(() => {
           flushConversations(conversationsRef.current, sessionPathRef.current);
         }, 0);
+
+        // 流式完成后，如需自动标题则调用模型生成
+        if (needsAutoTitle && selectedModel) {
+          // 等待 React state 同步后获取最新对话中的 assistant 消息
+          setTimeout(() => {
+            const conv = conversationsRef.current.find((c) => c.id === activeId);
+            if (conv) {
+              const assistantMsgs = conv.messages.filter((m) => m.role === 'assistant');
+              const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
+              if (lastAssistant && lastAssistant.content) {
+                generateConversationTitle(selectedModel, text, lastAssistant.content, activeId);
+              }
+            }
+          }, 0);
+        }
       }
     },
     [activeId, selectedModel, conversations, updateConv, mode],
@@ -1081,6 +1199,10 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
                   isCompressing={isCompressing}
                   mode={mode}
                   onModeChange={setMode}
+                  pendingFiles={pendingFiles}
+                  onRemovePendingFile={handleRemovePendingFile}
+                  onClearPendingFiles={() => setPendingFiles([])}
+                  dragOver={dragOver}
                 />
               )}
             </div>

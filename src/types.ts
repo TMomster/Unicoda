@@ -52,6 +52,8 @@ export interface Conversation {
   pinned: boolean;
   createdAt: number;
   updatedAt: number;
+  /** 是否已完成自动标题生成（仅在新会话第一次对话完成后触发一次） */
+  autoTitleDone?: boolean;
 }
 
 export interface ModelParams {
