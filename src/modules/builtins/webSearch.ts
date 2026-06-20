@@ -470,7 +470,7 @@ function parseBingHtml(html: string, maxResults: number): SearchResult[] {
 async function loadSearxngConfig(): Promise<SearxngConfig | null> {
   try {
     const config = await readConfigFile<SearxngConfig>(
-      "unison-searxng",
+      "unicoda-searxng",
       { enabled: false, baseUrl: "", categories: "general", language: "zh-CN", safeSearch: 0 },
     );
     return config.enabled && config.baseUrl ? config : null;
@@ -497,7 +497,7 @@ async function searchSearxng(
 
   const json = await invoke<string>("http_fetch", {
     url: apiUrl,
-    userAgent: "Unison/1.0",
+    userAgent: "Unicoda/1.0",
     timeoutMs: 15000,
     noProxy: true,
     acceptHeader: "application/json",

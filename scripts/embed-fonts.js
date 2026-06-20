@@ -5,7 +5,7 @@
  * and generates src/fonts.css with inline data URIs.
  * 
  * This ensures font data is compiled into the frontend bundle
- * and ultimately embedded inside unison.exe by Tauri.
+ * and ultimately embedded inside unicoda.exe by Tauri.
  */
 
 import https from "https";

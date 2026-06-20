@@ -40,7 +40,7 @@ export const DEFAULT_SEARXNG_CONFIG: SearxngConfig = {
   safeSearch: 0,
 };
 
-const SEARXNG_CONFIG_KEY = "unison-searxng";
+const SEARXNG_CONFIG_KEY = "unicoda-searxng";
 
 // ─── Context ────────────────────────────────────────────────────────
 

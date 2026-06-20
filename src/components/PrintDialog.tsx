@@ -36,7 +36,7 @@ function getMessagePreview(msg: Message, maxLen = 120): string {
 
 const roleLabels: Record<string, string> = {
   user: "你",
-  assistant: "Unison",
+  assistant: "Unicoda",
   tool: "工具",
   system: "系统",
 };
@@ -154,6 +154,124 @@ export default function PrintDialog({
   });
   const [lastClickedIdx, setLastClickedIdx] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // ── 导出菜单状态 ────────────────────────────────
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  const exportBtnRef = useRef<HTMLButtonElement>(null);
+
+  // 点击外部关闭导出菜单
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(e.target as Node) &&
+        exportBtnRef.current &&
+        !exportBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showExportMenu]);
+
+  // ── 构建导出文本 / Markdown ──────────────────────
+  const buildExportContent = useCallback(
+    (format: "txt" | "md"): string => {
+      let selectedMsgs = messages.filter((m) => selectedIds.has(m.id));
+      if (hideToolCalls) selectedMsgs = selectedMsgs.filter((m) => m.role !== "tool");
+      if (hideDebugInfo) {
+        selectedMsgs = selectedMsgs.filter(
+          (m) => !(m.role === "assistant" && m.toolDebugInfo && m.toolDebugInfo.length > 0),
+        );
+      }
+      if (selectedMsgs.length === 0) return "";
+
+      const now = new Date();
+      const dateStr = now.toLocaleString("zh-CN", {
+        year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+      });
+
+      const lines: string[] = [];
+
+      if (format === "txt") {
+        const sep = "─".repeat(48);
+        lines.push(sep);
+        lines.push("Unicoda 会话结果导出");
+        lines.push(sep);
+        if (modelName) lines.push(`模型：${modelName}`);
+        lines.push(`共 ${selectedMsgs.length} 条消息 · ${dateStr}`);
+        lines.push("");
+
+        for (const msg of selectedMsgs) {
+          const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unicoda");
+          const ts = new Date(msg.timestamp).toLocaleString("zh-CN", {
+            month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+          });
+          lines.push(`──── [${label}] ${ts} ────`);
+          if (showReasoning && msg.reasoningContent) {
+            lines.push(`[思考过程]`);
+            lines.push(msg.reasoningContent);
+          }
+          lines.push(msg.content);
+          lines.push("");
+        }
+      } else {
+        // md
+        lines.push("# Unicoda 会话结果导出");
+        lines.push("");
+        if (modelName) lines.push(`- **模型**：${modelName}`);
+        lines.push(`- **共 ${selectedMsgs.length} 条消息** · ${dateStr}`);
+        lines.push("");
+        lines.push("---");
+        lines.push("");
+
+        for (const msg of selectedMsgs) {
+          const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unicoda");
+          const ts = new Date(msg.timestamp).toLocaleString("zh-CN", {
+            month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+          });
+          lines.push(`## ${label} — ${ts}`);
+          lines.push("");
+          if (showReasoning && msg.reasoningContent) {
+            lines.push("> **思考过程**");
+            lines.push(`> ${msg.reasoningContent.replace(/\n/g, "\n> ")}`);
+            lines.push("");
+          }
+          lines.push(msg.content);
+          lines.push("");
+          lines.push("---");
+          lines.push("");
+        }
+      }
+
+      return lines.join("\n");
+    },
+    [messages, selectedIds, modelName, userName, hideToolCalls, hideDebugInfo, showReasoning],
+  );
+
+  const handleExport = useCallback(
+    (format: "txt" | "md") => {
+      setShowExportMenu(false);
+      const content = buildExportContent(format);
+      if (!content) return;
+
+      const ext = format === "txt" ? "txt" : "md";
+      const mimeType = format === "txt" ? "text/plain" : "text/markdown";
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Unicoda_会话导出_${new Date().toISOString().slice(0, 10)}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    [buildExportContent],
+  );
 
   // 打开时自动滚动到底部（最新消息）
   useEffect(() => {
@@ -366,7 +484,7 @@ export default function PrintDialog({
     if (showAnchors) {
       const tocItems = selectedMsgs
         .map((msg, i) => {
-          const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unison");
+          const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unicoda");
           const preview = stripMarkdown(msg.content).slice(0, 50);
           return `<li><a href="#msg-${i}">${escapeHtml(label)}: ${escapeHtml(preview)}</a></li>`;
         })
@@ -377,7 +495,7 @@ export default function PrintDialog({
     // ── 消息列表 ──
     const messageHtml = selectedMsgs
       .map((msg, i) => {
-        const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unison");
+        const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unicoda");
         const ts = new Date(msg.timestamp).toLocaleString("zh-CN", {
           month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
         });
@@ -418,18 +536,18 @@ export default function PrintDialog({
       headerExtra += `<div class="print-model-info">模型：${escapeHtml(modelName)}</div>`;
     }
     if (showUnisonInfo) {
-      headerExtra += `<div class="print-unison-info">Unison v0.1.0</div>`;
+      headerExtra += `<div class="print-unison-info">Unicoda v0.1.0</div>`;
     }
 
     // ── 页脚许可证（固定显示） ──
-    const footerHtml = `<div class="print-footer">Unison v0.1.0 | Designed by Momster | Apache 2.0 License | ${dateStr}</div>`;
+    const footerHtml = `<div class="print-footer">Unicoda v0.1.0 | Designed by Momster | Apache 2.0 License | ${dateStr}</div>`;
 
     const printCss = getPrintStyles();
     const printHtml = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Unison 会话结果导出</title><style>${printCss}</style></head>
+<html><head><meta charset="utf-8"><title>Unicoda 会话结果导出</title><style>${printCss}</style></head>
 <body>
   <div class="print-header">
-    <h1>Unison 会话结果导出</h1>
+    <h1>Unicoda 会话结果导出</h1>
     <div class="print-meta">共 ${selectedMsgs.length} 条消息 · ${dateStr}</div>
     ${headerExtra}
   </div>
@@ -573,23 +691,90 @@ export default function PrintDialog({
             {t("print") || "打印"}
           </h2>
         </div>
-        <button
-          onClick={handlePrint}
-          disabled={selectedCount === 0}
-          style={{
-            background: selectedCount > 0 ? "#3b82f6" : "var(--c-bd)",
-            border: "none",
-            color: selectedCount > 0 ? "#fff" : "var(--c-t4)",
-            padding: "6px 16px",
-            borderRadius: "4px",
-            fontSize: "13px",
-            fontWeight: 600,
-            cursor: selectedCount > 0 ? "pointer" : "default",
-            transition: "all 0.15s",
-          }}
-        >
-          {t("print") || "打印"} 🖨️
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", position: "relative" }}>
+          <button
+            ref={exportBtnRef}
+            onClick={() => setShowExportMenu((v) => !v)}
+            disabled={selectedCount === 0}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--c-bd2)",
+              color: selectedCount > 0 ? "var(--c-txt)" : "var(--c-t4)",
+              padding: "6px 12px",
+              borderRadius: "4px",
+              fontSize: "13px",
+              cursor: selectedCount > 0 ? "pointer" : "default",
+              transition: "all 0.15s",
+            }}
+          >
+            以文档导出 📄
+          </button>
+          {showExportMenu && (
+            <div
+              ref={exportMenuRef}
+              style={{
+                position: "absolute",
+                top: "100%",
+                right: 0,
+                marginTop: "4px",
+                background: "var(--c-bg2)",
+                border: "1px solid var(--c-bd)",
+                borderRadius: "6px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+                zIndex: 300,
+                minWidth: "140px",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                onClick={() => handleExport("txt")}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: "13px",
+                  color: "var(--c-txt)",
+                  cursor: "pointer",
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--c-bg3)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                📝 纯文本 (.txt)
+              </div>
+              <div
+                onClick={() => handleExport("md")}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: "13px",
+                  color: "var(--c-txt)",
+                  cursor: "pointer",
+                  borderTop: "1px solid var(--c-bd)",
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--c-bg3)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                📄 Markdown (.md)
+              </div>
+            </div>
+          )}
+          <button
+            onClick={handlePrint}
+            disabled={selectedCount === 0}
+            style={{
+              background: selectedCount > 0 ? "#3b82f6" : "var(--c-bd)",
+              border: "none",
+              color: selectedCount > 0 ? "#fff" : "var(--c-t4)",
+              padding: "6px 16px",
+              borderRadius: "4px",
+              fontSize: "13px",
+              fontWeight: 600,
+              cursor: selectedCount > 0 ? "pointer" : "default",
+              transition: "all 0.15s",
+            }}
+          >
+            {t("print") || "打印"} 🖨️
+          </button>
+        </div>
       </div>
 
       {/* Settings bar */}
@@ -667,7 +852,7 @@ export default function PrintDialog({
           )}
           {displayMessages.map((msg, index) => {
             const isSelected = selectedIds.has(msg.id);
-            const label = msg.role === "user" ? (userName || "你") : (msg.role === "assistant" ? (modelName || "Unison") : (roleLabels[msg.role] || msg.role));
+            const label = msg.role === "user" ? (userName || "你") : (msg.role === "assistant" ? (modelName || "Unicoda") : (roleLabels[msg.role] || msg.role));
             return (
               <div
                 key={msg.id}

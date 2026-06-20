@@ -11,7 +11,7 @@ import {
 import { readConfigFile, writeConfigFile } from "../utils/configStorage";
 import { sha256 } from "../utils/crypto";
 
-const LOCK_CONFIG_KEY = "unison-lock";
+const LOCK_CONFIG_KEY = "unicoda-lock";
 
 interface LockConfig {
   /** SHA-256 哈希后的密码，空字符串表示未设置 */

@@ -37,7 +37,7 @@ interface ThemeContextType {
   resetSettings: () => void;
 }
 
-const STORAGE_KEY = "unison-theme";
+const STORAGE_KEY = "unicoda-theme";
 
 const FONT_OPTIONS: FontOption[] = [
   { name: "Noto Sans SC", label: "思源黑体 (Noto Sans SC)" },

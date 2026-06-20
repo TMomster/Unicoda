@@ -19,7 +19,7 @@ import SettingsPanel from "./SettingsPanel";
 import ComponentsPanel from "./ComponentsPanel";
 import FilePreviewPanel from "./FilePreviewPanel";
 
-const STORAGE_KEY = "unison-yolo-conversations";
+const STORAGE_KEY = "unicoda-yolo-conversations";
 let nextConvId = 1;
 let nextMsgId = 1;
 
@@ -846,7 +846,7 @@ export default function YoloPanel({ onBack }: Props) {
         flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
       }}>
         <div style={{ animation: "yolo-header-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both" }}>
-          <YoloHeader title={activeConv?.title ?? "Unison"} onBack={() => onBack?.()} onToggleSession={() => setSessionOpen((v) => !v)} onToggleWorkspace={() => setWorkspaceOpen((v) => !v)} onOpenSettings={openSettings} onOpenComponents={openComponents} />
+          <YoloHeader title={activeConv?.title ?? "Unicoda"} onBack={() => onBack?.()} onToggleSession={() => setSessionOpen((v) => !v)} onToggleWorkspace={() => setWorkspaceOpen((v) => !v)} onOpenSettings={openSettings} onOpenComponents={openComponents} />
         </div>
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0 }}>
           <YoloSessionSidebar open={sessionOpen} onClose={() => setSessionOpen(false)} conversations={conversations} activeId={activeId} onSelect={handleSelect} onCreate={handleCreate} onDelete={handleDelete} />

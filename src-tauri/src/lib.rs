@@ -1,8 +1,11 @@
 use base64::Engine;
 use std::collections::HashMap;
 use std::error::Error;
+use std::path::Path;
 use std::sync::OnceLock;
 use tauri::Manager;
+use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 
 fn get_config_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     app_handle
@@ -715,6 +718,206 @@ fn delete_credential(target: String) -> Result<(), String> {
     credential_manager::delete(&target)
 }
 
+// ─── 命令执行 ─────────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct CmdResult {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    timed_out: bool,
+}
+
+/// 在本地 Shell 中执行任意命令。
+/// Windows 使用 cmd /C，其余平台使用 sh -c。
+#[tauri::command]
+async fn execute_command(
+    command: String,
+    working_dir: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<CmdResult, String> {
+    let shell = if cfg!(target_os = "windows") { "cmd" } else { "sh" };
+    let flag = if cfg!(target_os = "windows") { "/C" } else { "-c" };
+
+    let mut cmd = Command::new(shell);
+    cmd.arg(flag)
+        .arg(&command)
+        .kill_on_drop(true);
+
+    if let Some(dir) = &working_dir {
+        cmd.current_dir(dir);
+    }
+
+    let dur = Duration::from_millis(timeout_ms.unwrap_or(30_000));
+    match timeout(dur, cmd.output()).await {
+        Ok(Ok(output)) => Ok(CmdResult {
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+            timed_out: false,
+        }),
+        Ok(Err(e)) => Err(format!("进程执行失败: {}", e)),
+        Err(_) => Ok(CmdResult {
+            stdout: String::new(),
+            stderr: "(命令执行超时)".to_string(),
+            exit_code: -1,
+            timed_out: true,
+        }),
+    }
+}
+
+// ─── 代码沙箱 ─────────────────────────────────────────────────────────────
+
+/// 在隔离的临时目录中运行代码片段，支持超时控制。
+/// 支持语言：python, javascript, typescript, shell, go, rust
+#[tauri::command]
+async fn run_code_sandbox(
+    code: String,
+    language: String,
+    timeout_ms: Option<u64>,
+) -> Result<CmdResult, String> {
+    let temp_base = std::env::temp_dir().join(format!("unicoda_sandbox_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_base).map_err(|e| e.to_string())?;
+
+    let result = match language.as_str() {
+        "python" | "py" => run_interpreter(&code, &temp_base, "python", "py", "snippet.py", timeout_ms).await,
+        "javascript" | "js" => run_interpreter(&code, &temp_base, "node", "js", "snippet.js", timeout_ms).await,
+        "typescript" | "ts" => run_interpreter(&code, &temp_base, "npx", "_ts", "snippet.ts", timeout_ms).await,
+        "shell" | "sh" | "bash" => run_shell_snippet(&code, &temp_base, timeout_ms).await,
+        "go" => run_interpreter(&code, &temp_base, "go", "_go", "main.go", timeout_ms).await,
+        "rust" => run_rust_sandbox(&code, &temp_base, timeout_ms).await,
+        _ => {
+            let _ = std::fs::remove_dir_all(&temp_base);
+            return Err(format!("不支持的 language: {}. 支持的: python, javascript, typescript, shell, go, rust", language));
+        }
+    };
+
+    let _ = std::fs::remove_dir_all(&temp_base);
+    result
+}
+
+async fn run_interpreter(
+    code: &str,
+    dir: &Path,
+    interpreter: &str,
+    _ext: &str,
+    filename: &str,
+    timeout_ms: Option<u64>,
+) -> Result<CmdResult, String> {
+    let file_path = dir.join(filename);
+    std::fs::write(&file_path, code).map_err(|e| e.to_string())?;
+
+    let mut cmd = Command::new(interpreter);
+    if interpreter == "npx" {
+        cmd.arg("tsx");
+    }
+    if interpreter == "go" {
+        cmd.arg("run");
+    }
+    cmd.arg(file_path.to_string_lossy().to_string())
+        .current_dir(dir)
+        .kill_on_drop(true);
+
+    let dur = Duration::from_millis(timeout_ms.unwrap_or(10_000));
+    match timeout(dur, cmd.output()).await {
+        Ok(Ok(output)) => Ok(CmdResult {
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+            timed_out: false,
+        }),
+        Ok(Err(e)) => Err(format!("进程执行失败: {}", e)),
+        Err(_) => Ok(CmdResult {
+            stdout: String::new(),
+            stderr: "(执行超时)".to_string(),
+            exit_code: -1,
+            timed_out: true,
+        }),
+    }
+}
+
+async fn run_shell_snippet(
+    code: &str,
+    dir: &Path,
+    timeout_ms: Option<u64>,
+) -> Result<CmdResult, String> {
+    let ext = if cfg!(target_os = "windows") { "bat" } else { "sh" };
+    let filename = format!("snippet.{}", ext);
+    let file_path = dir.join(&filename);
+    std::fs::write(&file_path, code).map_err(|e| e.to_string())?;
+
+    let shell = if cfg!(target_os = "windows") { "cmd" } else { "sh" };
+    let flag = if cfg!(target_os = "windows") { "/C" } else { "-c" };
+    let runner = file_path.to_string_lossy().to_string();
+
+    // Windows 用 cmd /C snippet.bat，Unix 用 sh snippet.sh
+    let mut cmd = Command::new(shell);
+    if cfg!(target_os = "windows") {
+        cmd.arg(flag).arg(&runner);
+    } else {
+        cmd.arg(flag).arg(&runner);
+    }
+    cmd.current_dir(dir).kill_on_drop(true);
+
+    let dur = Duration::from_millis(timeout_ms.unwrap_or(10_000));
+    match timeout(dur, cmd.output()).await {
+        Ok(Ok(output)) => Ok(CmdResult {
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+            timed_out: false,
+        }),
+        Ok(Err(e)) => Err(format!("进程执行失败: {}", e)),
+        Err(_) => Ok(CmdResult {
+            stdout: String::new(),
+            stderr: "(执行超时)".to_string(),
+            exit_code: -1,
+            timed_out: true,
+        }),
+    }
+}
+
+async fn run_rust_sandbox(
+    code: &str,
+    dir: &Path,
+    timeout_ms: Option<u64>,
+) -> Result<CmdResult, String> {
+    let src_dir = dir.join("src");
+    std::fs::create_dir_all(&src_dir).map_err(|e| e.to_string())?;
+    std::fs::write(src_dir.join("main.rs"), code).map_err(|e| e.to_string())?;
+
+    let cargo_toml = r#"[package]
+name = "snippet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+"#;
+    std::fs::write(dir.join("Cargo.toml"), cargo_toml).map_err(|e| e.to_string())?;
+
+    let mut cmd = Command::new("cargo");
+    cmd.args(["run", "--manifest-path", dir.join("Cargo.toml").to_string_lossy().as_ref()])
+        .current_dir(dir)
+        .kill_on_drop(true);
+
+    let dur = Duration::from_millis(timeout_ms.unwrap_or(30_000));
+    match timeout(dur, cmd.output()).await {
+        Ok(Ok(output)) => Ok(CmdResult {
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            exit_code: output.status.code().unwrap_or(-1),
+            timed_out: false,
+        }),
+        Ok(Err(e)) => Err(format!("Rust 执行失败: {}", e)),
+        Err(_) => Ok(CmdResult {
+            stdout: String::new(),
+            stderr: "(编译/运行超时)".to_string(),
+            exit_code: -1,
+            timed_out: true,
+        }),
+    }
+}
+
 // ─── App Entry ─────────────────────────────────────────────────────────
 
 pub fn run() {
@@ -739,6 +942,8 @@ pub fn run() {
             clear_search_cookies,
             get_cookie_info,
             read_file_content,
+            execute_command,
+            run_code_sandbox,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

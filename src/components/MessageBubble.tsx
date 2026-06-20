@@ -203,7 +203,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
           }}
         >
           <span style={{ fontSize: "12px", fontWeight: 600, color: isUser ? "#3b82f6" : isTool ? "#a78bfa" : "#22c55e" }}>
-            {isTool ? `🔧 ${message.toolCallId || "Tool"}` : isUser ? "你" : modelName || "Unison"}
+            {isTool ? `🔧 ${message.toolCallId || "Tool"}` : isUser ? "你" : modelName || "Unicoda"}
           </span>
           {!isTool && (
             <button

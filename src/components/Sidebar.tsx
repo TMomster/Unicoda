@@ -216,7 +216,7 @@ export default function Sidebar({
         <div style={{ padding: "14px 12px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <AuroraLogo size={28} onClick={onTogglePanel} title={t("yoloPanel")} style={{ cursor: "pointer" }} />
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--c-txt)" }}>Unison</span>
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--c-txt)" }}>Unicoda</span>
           </div>
           <button onClick={onToggleCollapse} title={t("collapseSidebar")}
             style={{ width: "24px", height: "24px", borderRadius: "6px", border: "none", background: "transparent", color: "var(--c-t5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}

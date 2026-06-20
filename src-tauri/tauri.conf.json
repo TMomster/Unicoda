@@ -1,7 +1,7 @@
 {
-  "productName": "Unison",
+  "productName": "Unicoda",
   "version": "0.1.0",
-  "identifier": "com.unison.unison-app",
+  "identifier": "com.unicoda.unicoda-app",
   "build": {
     "frontendDist": "../runpack",
     "devUrl": "http://localhost:1420",
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "Unison",
+        "title": "Unicoda",
         "width": 1100,
         "height": 750,
         "minWidth": 600,

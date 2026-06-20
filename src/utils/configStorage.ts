@@ -96,7 +96,7 @@ export async function getConfigDir(): Promise<string | null> {
 // ─── Windows Credential Manager API ─────────────────────────────────────
 
 /** 凭据目标名前缀 */
-const CRED_PREFIX = "Unison/apiKey/";
+const CRED_PREFIX = "Unicoda/apiKey/";
 
 /**
  * 将 API Key 存入 Windows Credential Manager。
@@ -113,9 +113,9 @@ export async function saveApiKey(modelId: string, apiKey: string): Promise<void>
   } catch {
     // fallback: 存到 localStorage
     try {
-      const keyMap = JSON.parse(localStorage.getItem("unison-apikeys") || "{}");
+      const keyMap = JSON.parse(localStorage.getItem("unicoda-apikeys") || "{}");
       keyMap[modelId] = apiKey;
-      localStorage.setItem("unison-apikeys", JSON.stringify(keyMap));
+      localStorage.setItem("unicoda-apikeys", JSON.stringify(keyMap));
     } catch { /* ignore */ }
   }
 }
@@ -134,7 +134,7 @@ export async function loadApiKey(modelId: string): Promise<string> {
 
   // fallback: 从 localStorage 读取
   try {
-    const keyMap = JSON.parse(localStorage.getItem("unison-apikeys") || "{}");
+    const keyMap = JSON.parse(localStorage.getItem("unicoda-apikeys") || "{}");
     return keyMap[modelId] || "";
   } catch { /* ignore */ }
   return "";
@@ -153,8 +153,8 @@ export async function deleteApiKey(modelId: string): Promise<void> {
 
   // 同时清理 localStorage fallback
   try {
-    const keyMap = JSON.parse(localStorage.getItem("unison-apikeys") || "{}");
+    const keyMap = JSON.parse(localStorage.getItem("unicoda-apikeys") || "{}");
     delete keyMap[modelId];
-    localStorage.setItem("unison-apikeys", JSON.stringify(keyMap));
+    localStorage.setItem("unicoda-apikeys", JSON.stringify(keyMap));
   } catch { /* ignore */ }
 }

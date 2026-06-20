@@ -1159,7 +1159,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
         >
           {t("aiDisclaimer")}
           <br />
-          Unison · designed by Momster
+          Unicoda · designed by Momster
         </p>
       </div>
     </div>

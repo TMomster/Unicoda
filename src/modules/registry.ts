@@ -30,4 +30,6 @@ export function initBuiltinModules(): void {
   import("./builtins/summaryPage");
   import("./builtins/readFromFiles");
   import("./builtins/writeToFile");
+  import("./builtins/executeCommand");
+  import("./builtins/runCodeSandbox");
 }

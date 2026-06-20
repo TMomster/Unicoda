@@ -180,7 +180,7 @@ export default function ComponentsPanel({ onBack, yolo }: Props) {
             {t("componentsTitle")}
           </div>
           <div style={{ fontSize: "12px", color: C.t4, marginTop: "2px" }}>
-            Unison
+            Unicoda
           </div>
         </div>
       </div>

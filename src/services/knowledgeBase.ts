@@ -19,16 +19,16 @@ export interface KnowledgeEntry {
   builtin: boolean;
 }
 
-const USER_CARDS_KEY = "unison-user-knowledge-cards";
+const USER_CARDS_KEY = "unicoda-user-knowledge-cards";
 
 const builtinEntries: KnowledgeEntry[] = [
   {
-    id: "kb-unison-intro",
-    title: "Unison 平台简介",
+    id: "kb-unicoda-intro",
+    title: "Unicoda 平台简介",
     category: "platform",
     enabled: true,
     builtin: true,
-    content: `Unison 是一个模块化 AI 助手桌面应用，基于 Tauri v2 + React 构建。
+    content: `Unicoda 是一个模块化 AI 助手桌面应用，基于 Tauri v2 + React 构建。
 核心能力包括：
 - 文件读写：支持在项目目录中读取和写入文件
 - 命令执行：支持在终端中运行命令并获取输出
@@ -65,7 +65,7 @@ const builtinEntries: KnowledgeEntry[] = [
     category: "platform",
     enabled: true,
     builtin: true,
-    content: `Unison 的模组（Module）系统提供了 4 个预置功能扩展，可通过 <tool_call> 标记调用：
+    content: `Unicoda 的模组（Module）系统提供了 4 个预置功能扩展，可通过 <tool_call> 标记调用：
 
 1. get_current_time（获取当前时间）
    - 参数：format（可选，full/date/time）

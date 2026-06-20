@@ -37,9 +37,9 @@ import FilePreviewPanel from "./components/FilePreviewPanel";
 /** 将当前会话列表写入文件（仅流式完成后调用） */
 function flushConversations(convs: Conversation[], path: string) {
   try {
-    localStorage.setItem("unison-conversations", JSON.stringify(convs));
+    localStorage.setItem("unicoda-conversations", JSON.stringify(convs));
   } catch { /* ignore */ }
-  writeConfigFile("unison-conversations", convs, path);
+  writeConfigFile("unicoda-conversations", convs, path);
 }
 
 let nextConvId = 1;
@@ -66,7 +66,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     try {
-      const raw = localStorage.getItem("unison-conversations");
+      const raw = localStorage.getItem("unicoda-conversations");
       if (raw) {
         const loaded: Conversation[] = JSON.parse(raw);
         // 确保每个会话有有效 id
@@ -100,7 +100,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   useEffect(() => {
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
-    readConfigFile<Conversation[]>("unison-conversations", [], sessionPath).then((loaded) => {
+    readConfigFile<Conversation[]>("unicoda-conversations", [], sessionPath).then((loaded) => {
       if (loaded.length > 0) {
         setConversations(loaded);
         for (const c of loaded) {
@@ -996,7 +996,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         e.preventDefault();
         const g = printGuardRef.current;
         if (g.isLocked) {
-          showToast("Unison 已锁定，请先解锁");
+          showToast("Unicoda 已锁定，请先解锁");
         } else if (g.panelMode === "Yolo") {
           showToast("Yolo 窗口不支持打印");
         } else if (g.settingsOpen) {
@@ -1138,7 +1138,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         pointerEvents: defaultOpacity > 0.5 ? "auto" : "none",
       }}>
         {/* Custom Title Bar */}
-        <TitleBar title={activeConv?.title ?? "Unison"} />
+        <TitleBar title={activeConv?.title ?? "Unicoda"} />
 
         {/* Body */}
         <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>

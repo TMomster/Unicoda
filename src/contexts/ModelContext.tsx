@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useMemo, useEffect, t
 import type { ModelConfig } from "../types";
 import { readConfigFile, writeConfigFile, saveApiKey, loadApiKey, deleteApiKey } from "../utils/configStorage";
 
-const STORAGE_KEY = "unison-models";
+const STORAGE_KEY = "unicoda-models";
 
 let nextModelId = 1;
 
