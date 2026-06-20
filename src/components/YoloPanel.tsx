@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { Conversation, Message, Mode, FileAttachment } from "../types";
 import { useTheme } from "../contexts/ThemeContext";
@@ -8,6 +9,7 @@ import { streamChatCompletion } from "../services/modelApi";
 import { writeConfigFile, readConfigFile } from "../utils/configStorage";
 import { buildAgentSystemPrompt, parseToolCalls, stripToolCalls, executeToolCall } from "../services/agentEngine";
 import { compressConversation, MIN_MESSAGES_FOR_COMPRESSION } from "../services/conversationCompression";
+import { playNotificationSound } from "../utils/notificationSound";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon } from "../constants/windowIcons";
 import AuroraBackground from "./AuroraBackground";
@@ -535,6 +537,15 @@ export default function YoloPanel({ onBack }: Props) {
     setPendingFiles((prev) => prev.filter((f) => f.id !== fileId));
   }, []);
 
+  // ── 请求系统通知权限 ──
+  useEffect(() => {
+    (async () => {
+      if (!(await isPermissionGranted())) {
+        await requestPermission();
+      }
+    })();
+  }, []);
+
   const openSettings = useCallback(() => {
     setSettingsOpen(true);
     setSettingsAnim("enter");
@@ -759,10 +770,17 @@ export default function YoloPanel({ onBack }: Props) {
         }
       }
     } finally {
+      const completedNormally = !ac.signal.aborted;
       setIsStreaming(false);
       streamingMsgIdRef.current = null;
       abortRef.current = null;
       setTimeout(() => flushConversations(conversationsRef.current, sessionPathRef.current), 0);
+
+      // 会话完成后发送系统通知（屏幕右下角）
+      if (completedNormally) {
+        playNotificationSound();
+        sendNotification({ title: "会话任务已完成。", body: "" });
+      }
 
       // 流式完成后，如需自动标题则调用模型生成
       if (needsAutoTitle && selectedModel) {
@@ -842,7 +860,7 @@ export default function YoloPanel({ onBack }: Props) {
                 animation: "yolo-content-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both",
               }}>
                 {activeConv && activeConv.messages.length > 0 ? (
-                  <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} />
+                  <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} isStreaming={isStreaming} />
                 ) : (
                   <YoloWelcome />
                 )}

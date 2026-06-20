@@ -231,6 +231,14 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
     return () => ro.disconnect();
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 流式生成完成后自动聚焦输入框
+  const prevDisabledRef = useRef(disabled);
+  useEffect(() => {
+    if (prevDisabledRef.current === true && disabled === false) {
+      textareaRef.current?.focus();
+    }
+    prevDisabledRef.current = disabled;
+  }, [disabled]);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -652,7 +660,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     >
                       {MODES.filter(m => yolo || m !== "Yolo").map((m) => {
                         const isSelected = m === mode;
-                        const disabled = m === "Agent";
+                        const disabled = false;
                         return (
                           <button
                             key={m}

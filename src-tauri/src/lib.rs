@@ -467,6 +467,16 @@ fn save_file_at_path(dir: String, filename: String, data: String) -> Result<(), 
     std::fs::write(path.join(&filename), &data).map_err(|e| e.to_string())
 }
 
+/// 写入文本文件到指定绝对路径（由 write_to_file 模组使用）
+#[tauri::command]
+fn write_text_file_at(path: String, data: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(p, &data).map_err(|e| e.to_string())
+}
+
 /// 从自定义目录读取文件
 #[tauri::command]
 fn load_file_from_path(dir: String, filename: String) -> Result<String, String> {
@@ -710,12 +720,14 @@ fn delete_credential(target: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             http_fetch,
             save_config,
             load_config,
             get_config_dir_path,
             save_file_at_path,
+            write_text_file_at,
             load_file_from_path,
             list_directory,
             get_path_metadata,

@@ -29,4 +29,5 @@ export function initBuiltinModules(): void {
   import("./builtins/fetchPage");
   import("./builtins/summaryPage");
   import("./builtins/readFromFiles");
+  import("./builtins/writeToFile");
 }

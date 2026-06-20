@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { Conversation, FileAttachment, Message, Mode, PanelMode, ModelConfig } from "./types";
 import { useTheme, scaleToTransform } from "./contexts/ThemeContext";
@@ -9,6 +10,7 @@ import { LockProvider } from "./contexts/LockContext";
 import { SearchProvider } from "./contexts/SearchContext";
 import { streamChatCompletion } from "./services/modelApi";
 import { writeConfigFile, readConfigFile } from "./utils/configStorage";
+import { playNotificationSound } from "./utils/notificationSound";
 import { initBuiltinModules } from "./modules/registry";
 import {
   buildAgentSystemPrompt,
@@ -340,6 +342,12 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const { isLocked } = useLock();
   useEffect(() => {
     initBuiltinModules();
+    // 请求系统通知权限（通过 Tauri 插件注册 AppUserModelId）
+    (async () => {
+      if (!(await isPermissionGranted())) {
+        await requestPermission();
+      }
+    })();
   }, []);
 
   // ── Compression state ────────────────────────────────────
@@ -885,12 +893,19 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
           }
         }
       } finally {
+        const completedNormally = !abortController.signal.aborted;
         setIsStreaming(false);
         streamingMsgIdRef.current = null;
         abortRef.current = null;
         setTimeout(() => {
           flushConversations(conversationsRef.current, sessionPathRef.current);
         }, 0);
+
+        // 会话完成后发送系统通知（屏幕右下角）
+        if (completedNormally) {
+          playNotificationSound();
+          sendNotification({ title: "会话任务已完成。", body: "" });
+        }
 
         // 流式完成后，如需自动标题则调用模型生成
         if (needsAutoTitle && selectedModel) {
@@ -1169,7 +1184,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             >
               {/* Messages */}
               {activeConv ? (
-                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} />
+                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} isStreaming={isStreaming} />
               ) : (
                 <div
                   style={{
