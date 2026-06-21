@@ -32,4 +32,11 @@ export function initBuiltinModules(): void {
   import("./builtins/writeToFile");
   import("./builtins/executeCommand");
   import("./builtins/runCodeSandbox");
+  import("./builtins/searchInProject");
+  import("./builtins/getProjectReview");
+  import("./builtins/checkApiBalance");
+  import("./builtins/lintCode");
+  import("./builtins/getUnicodaStatus");
+  import("./builtins/getWorkspaceInfo");
+  import("./builtins/editFile");
 }

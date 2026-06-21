@@ -463,11 +463,26 @@ fn get_config_dir_path(app_handle: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// 保存文件到自定义目录（不加密）
+/// filename 可以包含子路径（如 "normal/literals/1.json"），
+/// 会自动创建所有必要的父目录。
 #[tauri::command]
 fn save_file_at_path(dir: String, filename: String, data: String) -> Result<(), String> {
-    let path = std::path::Path::new(&dir);
-    std::fs::create_dir_all(path).map_err(|e| e.to_string())?;
-    std::fs::write(path.join(&filename), &data).map_err(|e| e.to_string())
+    let full_path = std::path::Path::new(&dir).join(&filename);
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&full_path, &data).map_err(|e| e.to_string())
+}
+
+/// 删除自定义目录下的文件（不加密）
+#[tauri::command]
+fn remove_file_at_path(dir: String, filename: String) -> Result<(), String> {
+    let full_path = std::path::Path::new(&dir).join(&filename);
+    if full_path.exists() {
+        std::fs::remove_file(&full_path).map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    }
 }
 
 /// 写入文本文件到指定绝对路径（由 write_to_file 模组使用）
@@ -729,19 +744,29 @@ struct CmdResult {
 }
 
 /// 在本地 Shell 中执行任意命令。
-/// Windows 使用 cmd /C，其余平台使用 sh -c。
+/// Windows 使用 powershell，其余平台使用 sh -c。
+/// PowerShell 下自动前置 UTF-8 编码设置，确保中文输出正确。
 #[tauri::command]
 async fn execute_command(
     command: String,
     working_dir: Option<String>,
     timeout_ms: Option<u64>,
 ) -> Result<CmdResult, String> {
-    let shell = if cfg!(target_os = "windows") { "cmd" } else { "sh" };
-    let flag = if cfg!(target_os = "windows") { "/C" } else { "-c" };
+    let (shell, flag, cmd_arg): (&str, &str, String) = if cfg!(target_os = "windows") {
+        // PowerShell 管道输出默认为 UTF-16LE，前置编码设置确保 UTF-8 捕获
+        // 注意：仅设置 OutputEncoding，PowerShell 5.1 没有 ErrorEncoding 属性
+        let ps_command = format!(
+            "[Console]::OutputEncoding = [Text.Encoding]::UTF8; {}",
+            command
+        );
+        ("powershell", "-Command", ps_command)
+    } else {
+        ("sh", "-c", command)
+    };
 
     let mut cmd = Command::new(shell);
     cmd.arg(flag)
-        .arg(&command)
+        .arg(&cmd_arg)
         .kill_on_drop(true);
 
     if let Some(dir) = &working_dir {
@@ -932,6 +957,7 @@ pub fn run() {
             save_file_at_path,
             write_text_file_at,
             load_file_from_path,
+            remove_file_at_path,
             list_directory,
             get_path_metadata,
             read_text_file_at,

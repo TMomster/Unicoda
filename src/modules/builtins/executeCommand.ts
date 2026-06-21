@@ -24,12 +24,12 @@ interface CmdResult {
   timed_out: boolean;
 }
 
-function formatResult(r: CmdResult): string {
+function formatResult(command: string, r: CmdResult): string {
   const lines: string[] = [];
-  if (r.stdout) lines.push(`[标准输出]\n${r.stdout}`);
-  if (r.stderr) lines.push(`[标准错误]\n${r.stderr}`);
-  if (r.timed_out) lines.push("\n⚠️ 执行超时，进程已终止");
-  lines.push(`\n[退出码: ${r.exit_code}]`);
+  lines.push(`> ${command}`);
+  lines.push(`[退出码: ${r.exit_code}]${r.timed_out ? " ⚠️ 执行超时" : ""}`);
+  if (r.stdout) lines.push(`\n[标准输出]\n${r.stdout}`);
+  if (r.stderr) lines.push(`\n[标准错误]\n${r.stderr}`);
   return lines.join("\n");
 }
 
@@ -40,20 +40,24 @@ const mod: Module = {
     "在用户本地 Shell 中执行命令行指令，返回标准输出、标准错误和退出码。\n\n" +
     "工作原理：Unicoda 在后端启动一个子进程执行命令，通过管道捕获 stdout/stderr。" +
     "支持超时保护（默认 30 秒），超时后进程自动终止。\n\n" +
+    "Windows 平台使用 PowerShell 执行命令（自动配置 UTF-8 编码以确保中文输出正确），" +
+    "非 Windows 平台使用 sh。\n\n" +
     "可执行的操作包括但不限于：\n" +
     "- 包管理：npm install / pip install / cargo add\n" +
     "- 构建：npm run build / cargo build / make\n" +
     "- 运行脚本：python script.py / node app.js\n" +
-    "- 文件操作：dir / ls / mkdir / copy\n" +
+    "- 文件操作：dir / ls / mkdir / copy / Remove-Item\n" +
     "- Git 操作：git status / git log\n\n" +
-    "⚠️ 此模组具有代码执行能力，请确认用户意图后再使用。",
+    "⚠️ 此模组具有代码执行能力，请确认用户意图后再使用。" +
+    "⚠️ Windows 下使用 PowerShell，请使用 PowerShell 语法（如 Remove-Item 而非 del/rd）。",
+  userDescription: "在本地系统中执行命令行指令（敏感操作）",
   level: "sensitive",
   parameters: [
     {
       name: "command",
       type: "string",
       required: true,
-      description: "要执行的命令字符串。Windows 下使用 cmd.exe 执行，支持所有标准命令。",
+      description: "要执行的命令字符串。Windows 下使用 PowerShell 执行（自动 UTF-8 编码），请使用 PowerShell 语法。",
     },
     {
       name: "workingDir",
@@ -83,7 +87,7 @@ const mod: Module = {
         timeoutMs: params.timeoutMs ? parseInt(params.timeoutMs, 10) : null,
       });
 
-      yield formatResult(result);
+      yield formatResult(command, result);
     } catch (err) {
       yield `错误：命令执行失败 - ${err instanceof Error ? err.message : String(err)}`;
     }

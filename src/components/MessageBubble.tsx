@@ -119,6 +119,11 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
       const startTime = message.timestamp;
       const endTime = message.reasoningEndTime;
       const updateElapsed = () => {
+        // 非流式消息缺少 reasoningEndTime 时（旧消息），不展示误导性超长计时
+        if (!isStreaming && !endTime) {
+          setElapsed(0);
+          return;
+        }
         const now = endTime ?? Date.now();
         setElapsed(Math.floor((now - startTime) / 1000));
       };
@@ -148,6 +153,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
     "Bad gateway": "网关错误",
     "Service unavailable": "服务暂不可用",
     "Gateway timeout": "网关超时",
+    "网络连接失败": "网络连接失败 - 请检查网络连接和 API 代理设置",
   };
   const errorBodyZh = apiErrorMatch ? (ERROR_MESSAGE_ZH[apiErrorMatch[2]] || apiErrorMatch[2]) : "";
 
@@ -297,6 +303,35 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                 {reasoningInProgress && <span className="streaming-cursor">▊</span>}
               </div>
             )}
+          </div>
+        )}
+
+        {/* 正在发起工具调用（占位面板） */}
+        {message.toolCallInProgress && (
+          <div
+            style={{
+              marginBottom: "12px",
+              borderRadius: "8px",
+              border: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid var(--c-bd)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "8px 12px",
+                userSelect: "none",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: yolo ? "rgba(255,255,255,0.65)" : "var(--c-t2)",
+                background: yolo ? "rgba(255,255,255,0.03)" : "var(--c-bg3)",
+              }}
+            >
+              <div className="aurora-ball" />
+              <span>{t("toolCallInProgress")}</span>
+            </div>
           </div>
         )}
 
@@ -455,6 +490,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#ef4444" }}>
                     {(() => {
                       const status = parseInt(apiErrorMatch[1], 10);
+                      if (status === 0) return "网络连接失败";
                       if (status === 402) return "API 请求被拒绝";
                       if (status === 401) return "API 密钥无效";
                       if (status === 429) return "请求频率过高";
@@ -498,7 +534,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               )}
             </div>
           )}
-          {isStreaming && !hasReasoning && !isTool && (
+          {isStreaming && !hasReasoning && !isTool && !message.toolCallInProgress && (
             <span className="streaming-cursor">▊</span>
           )}
         </div>
@@ -584,7 +620,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
         )}
       </div>
 
-      {(isStreaming || hasReasoning || isTool) && <style>{animations}</style>}
+      {(isStreaming || hasReasoning || isTool || message.toolCallInProgress) && <style>{animations}</style>}
     </div>
   );
 }

@@ -310,7 +310,7 @@ export default function Sidebar({
           {filtered.map((conv) => {
             const isSelected = selectedIds.has(conv.id);
             return (
-            <div key={conv.id} style={{ position: "relative" }}>
+            <div key={conv.id + conv.title} style={{ position: "relative" }}>
               <div onClick={(e) => {
                 // 点击选框区域 -> 切换选中
                 const target = e.target as HTMLElement;

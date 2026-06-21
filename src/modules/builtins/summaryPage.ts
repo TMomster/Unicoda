@@ -111,6 +111,7 @@ const mod: Module = {
   name: "总结网页内容",
   description:
     "获取指定 URL 的网页内容，并使用 AI 自动生成多角度摘要。当你需要快速了解一篇长文章的核心观点、不想阅读全文时使用。注意：此模组会消耗一次 API 调用额度。如果需要获取网页完整原文，请使用 fetch_page。",
+  userDescription: "获取网页内容并自动生成多角度摘要",
   level: "normal",
   parameters: [
     {

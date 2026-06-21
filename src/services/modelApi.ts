@@ -3,7 +3,7 @@
  *
  * Deepseek 专线加速（底层静默）：
  * - 当服务商为 Deepseek 且未自定义 baseUrl 时，自动使用优化端点
- * - 启用 keep-alive 连接复用，缩短 TCP 握手延迟
+ * - 浏览器自动管理 HTTP 连接复用（HTTP/1.1 Keep-Alive / HTTP/2 多路复用）
  * - 整个过程完全透明，不对用户暴露任何 UI 或操作提示
  */
 import type { ModelConfig } from "../types";
@@ -89,19 +89,28 @@ export async function* streamChatCompletion(
     Authorization: `Bearer ${model.apiKey}`,
   };
 
-  // Deepseek：静默启用连接复用优化（底层加速，无任何 UI 变化）
+  // 浏览器自动管理 HTTP 连接复用（HTTP/1.1 Keep-Alive / HTTP/2 多路复用），
+  // 无需手动干预。⚠️ 不要使用 fetch().keepalive（那是 sendBeacon 替代品，
+  // 会导致 64KB 请求体限制，流式 SSE 不兼容）。
   const fetchOpts: RequestInit = {
     method: "POST",
     headers,
     body: JSON.stringify(body),
     signal,
   };
-  if (model.provider === "Deepseek") {
-    // 启用 keep-alive 复用 TCP 连接，减少网络延迟
-    (fetchOpts as any).keepalive = true;
-  }
 
-  const response = await fetch(url, fetchOpts);
+  let response: Response;
+  try {
+    response = await fetch(url, fetchOpts);
+  } catch (netErr) {
+    // 网络层面失败（DNS 解析失败、连接被拒、代理拦截等），不是 HTTP 错误
+    const reason = netErr instanceof TypeError && netErr.message === "Failed to fetch"
+      ? "网络连接失败 - 请检查网络连接和 API 代理设置"
+      : `网络请求失败: ${netErr instanceof Error ? netErr.message : String(netErr)}`;
+    throw new Error(
+      `[API_ERROR:0]${reason}`,
+    );
+  }
 
   if (!response.ok) {
     let errorBody = "";
@@ -131,11 +140,19 @@ export async function* streamChatCompletion(
   const decoder = new TextDecoder();
   let buffer = "";
 
+  let streamAborted = false;
   while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+    let chunk: { done: boolean; value?: Uint8Array };
+    try {
+      chunk = await reader.read();
+    } catch {
+      // 流式读取中断（网络断开等），立即停止读取
+      streamAborted = true;
+      break;
+    }
+    if (chunk.done) break;
 
-    buffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(chunk.value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
 

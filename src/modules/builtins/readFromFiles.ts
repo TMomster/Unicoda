@@ -128,6 +128,7 @@ const mod: Module = {
     "- read_file：读取指定文件的内容（path 必填），仅支持文本文件，默认最多 50000 字符\n" +
     "- get_info：获取路径的详细信息（path 可选，默认当前目录）\n\n" +
     "⚠️ 本模组仅支持读取文件，不支持写入、修改或删除操作。二进制文件无法读取内容。",
+  userDescription: "浏览本地文件系统、读取文本文件内容、查看文件信息",
   level: "normal",
   parameters: [
     {

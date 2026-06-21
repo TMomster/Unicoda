@@ -137,6 +137,8 @@ interface Props {
   disabled: boolean;
   /** 上下文容量 + 压缩控制 */
   messages?: Message[];
+  /** 记忆量消息（用于 API 通讯，可能被压缩）；回退到 messages */
+  memoryMessages?: Message[];
   maxTokens?: number;
   compressionEnabled?: boolean;
   onToggleCompression?: () => void;
@@ -209,7 +211,7 @@ function FileChip({ file, yolo, onRemove }: { file: FileAttachment; yolo?: boole
   );
 }
 
-export default function InputBar({ onSend, onStop, disabled, messages, maxTokens, compressionEnabled, onToggleCompression, onCompressNow, isCompressing, mode, onModeChange, yolo, pendingFiles, onRemovePendingFile, onClearPendingFiles, dragOver: dragOverProp }: Props) {
+export default function InputBar({ onSend, onStop, disabled, messages, memoryMessages, maxTokens, compressionEnabled, onToggleCompression, onCompressNow, isCompressing, mode, onModeChange, yolo, pendingFiles, onRemovePendingFile, onClearPendingFiles, dragOver: dragOverProp }: Props) {
   const { t } = useTheme();
   const { models, selectedModelId, setSelectedModelId } = useModels();
   const [text, setText] = useState("");
@@ -426,15 +428,16 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
 
   const selectedModel = models.find((m) => m.id === selectedModelId);
 
-  // 计算上下文用量
+  // 计算上下文用量（基于记忆量消息）
   const { usedTokens, pct } = useMemo(() => {
-    if (!maxTokens || maxTokens <= 0 || !messages) return { usedTokens: 0, pct: 0 };
-    const total = messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+    const targetMsgs = memoryMessages ?? messages;
+    if (!maxTokens || maxTokens <= 0 || !targetMsgs) return { usedTokens: 0, pct: 0 };
+    const total = targetMsgs.reduce((sum, m) => sum + estimateTokens(m.content), 0);
     return {
       usedTokens: total,
       pct: Math.min(100, Math.round((total / maxTokens) * 100)),
     };
-  }, [messages, maxTokens]);
+  }, [memoryMessages, messages, maxTokens]);
 
   return (
     <div
@@ -660,7 +663,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, maxTokens
                     >
                       {MODES.filter(m => yolo || m !== "Yolo").map((m) => {
                         const isSelected = m === mode;
-                        const disabled = false;
+                        const disabled = yolo && m === "Yolo";
                         return (
                           <button
                             key={m}

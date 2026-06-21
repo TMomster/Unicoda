@@ -58,6 +58,7 @@ const mod: Module = {
     "- rust — 创建完整 cargo 项目编译运行（需 rustc + cargo 已安装，超时默认 30 秒）\n\n" +
     "⚠️ 此模组具有代码执行能力，请确认用户意图后再使用。" +
     "本沙箱为轻量隔离，不建议运行不受信任的第三方代码。",
+  userDescription: "在隔离的临时环境中运行 Python、JS、Rust 等代码（敏感操作）",
   level: "sensitive",
   parameters: [
     {

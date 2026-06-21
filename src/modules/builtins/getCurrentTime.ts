@@ -40,6 +40,7 @@ const mod: Module = {
   name: "获取当前时间",
   description:
     "获取当前系统日期和时间，包括星期和时区信息。当你需要知道今天的确切日期来搜索最新新闻、或判断时间基准时使用。",
+  userDescription: "获取当前系统时间和时区信息",
   level: "normal",
   parameters: [
     {

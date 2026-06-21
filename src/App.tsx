@@ -9,9 +9,10 @@ import { ModelProvider } from "./contexts/ModelContext";
 import { LockProvider } from "./contexts/LockContext";
 import { SearchProvider } from "./contexts/SearchContext";
 import { streamChatCompletion } from "./services/modelApi";
-import { writeConfigFile, readConfigFile } from "./utils/configStorage";
+import { readConfigFile } from "./utils/configStorage";
 import { playNotificationSound } from "./utils/notificationSound";
 import { initBuiltinModules } from "./modules/registry";
+import { updateUnicodaStatus } from "./modules/builtins/getUnicodaStatus";
 import {
   buildAgentSystemPrompt,
   parseToolCalls,
@@ -21,7 +22,18 @@ import {
 import {
   compressConversation,
   MIN_MESSAGES_FOR_COMPRESSION,
+  hasCompressionSummary,
 } from "./services/conversationCompression";
+import {
+  loadMetadata,
+  loadLiteralMessages,
+  loadMemoryMessages,
+  flushConversationData,
+  toMeta,
+  migrateFromOldFormat,
+  deleteConversationFiles,
+} from "./services/conversationStorage";
+import type { ConversationMeta } from "./services/conversationStorage";
 import { useLock } from "./contexts/LockContext";
 import LockOverlay from "./components/LockOverlay";
 import Sidebar from "./components/Sidebar";
@@ -34,12 +46,20 @@ import YoloPanel from "./components/YoloPanel";
 import PrintDialog from "./components/PrintDialog";
 import FilePreviewPanel from "./components/FilePreviewPanel";
 
-/** 将当前会话列表写入文件（仅流式完成后调用） */
+/** 将全部会话数据写入文件（仅流式完成后调用） */
+let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
 function flushConversations(convs: Conversation[], path: string) {
-  try {
-    localStorage.setItem("unicoda-conversations", JSON.stringify(convs));
-  } catch { /* ignore */ }
-  writeConfigFile("unicoda-conversations", convs, path);
+  // 异步落盘，使用防抖避免频繁 I/O
+  if (pendingFlushTimer) clearTimeout(pendingFlushTimer);
+  pendingFlushTimer = setTimeout(async () => {
+    pendingFlushTimer = null;
+    await flushConversationData(convs, "normal", path);
+    // localStorage 缓存元数据（不含消息体，仅作快速读取）
+    const metas = convs.map(toMeta);
+    try {
+      localStorage.setItem("unicoda-conversations-meta", JSON.stringify(metas));
+    } catch { /* ignore */ }
+  }, 100);
 }
 
 let nextConvId = 1;
@@ -65,22 +85,23 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const { scale, fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode, theme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(() => {
+    // 快速初始加载：优先用 localStorage 缓存的元数据
     try {
-      const raw = localStorage.getItem("unicoda-conversations");
+      const raw = localStorage.getItem("unicoda-conversations-meta");
       if (raw) {
-        const loaded: Conversation[] = JSON.parse(raw);
-        // 确保每个会话有有效 id
-        for (const c of loaded) {
-          const idNum = parseInt(c.id, 10);
-          if (idNum >= nextConvId) nextConvId = idNum + 1;
-          if (c.messages) {
-            for (const m of c.messages) {
-              const midNum = parseInt(m.id, 10);
-              if (midNum >= nextMsgId) nextMsgId = midNum + 1;
-            }
+        const metas: ConversationMeta[] = JSON.parse(raw);
+        if (metas.length > 0) {
+          const loaded: Conversation[] = metas.map((m) => ({
+            ...m,
+            messages: [],
+            memoryMessages: [],
+          }));
+          for (const c of loaded) {
+            const idNum = parseInt(c.id, 10);
+            if (idNum >= nextConvId) nextConvId = idNum + 1;
           }
+          return loaded;
         }
-        return loaded;
       }
     } catch { /* ignore */ }
     return [
@@ -88,6 +109,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         id: String(nextConvId++),
         title: makeConvTitle([], locale),
         messages: [],
+        memoryMessages: [],
         pinned: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -95,27 +117,80 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     ];
   });
 
-  // 异步初始化：启动时从文件加载
+  const [activeId, setActiveId] = useState<string>(conversations[0].id);
+
+  // 异步初始化：迁移旧格式 + 从文件加载消息体
   const initialLoadDone = useRef(false);
+  const loadedConvIds = useRef(new Set<string>());
   useEffect(() => {
     if (initialLoadDone.current) return;
     initialLoadDone.current = true;
-    readConfigFile<Conversation[]>("unicoda-conversations", [], sessionPath).then((loaded) => {
-      if (loaded.length > 0) {
-        setConversations(loaded);
-        for (const c of loaded) {
-          const idNum = parseInt(c.id, 10);
-          if (idNum >= nextConvId) nextConvId = idNum + 1;
-          if (c.messages) {
-            for (const m of c.messages) {
-              const midNum = parseInt(m.id, 10);
-              if (midNum >= nextMsgId) nextMsgId = midNum + 1;
-            }
+
+    (async () => {
+      // 1. 尝试迁移旧格式
+      if (sessionPath) {
+        await migrateFromOldFormat("unicoda-conversations", "normal", sessionPath);
+      }
+
+      // 2. 加载元数据（覆盖 localStorage 缓存）
+      if (sessionPath) {
+        const freshMetas = await loadMetadata("normal", sessionPath);
+        if (freshMetas.length > 0) {
+          const loaded: Conversation[] = freshMetas.map((m) => ({
+            ...m,
+            messages: [],
+            memoryMessages: [],
+          }));
+          for (const c of loaded) {
+            const idNum = parseInt(c.id, 10);
+            if (idNum >= nextConvId) nextConvId = idNum + 1;
           }
+          setConversations(loaded);
+          // 更新 localStorage 缓存
+          try {
+            localStorage.setItem("unicoda-conversations-meta", JSON.stringify(freshMetas));
+          } catch { /* ignore */ }
+          return; // 等待 activeConv 加载
         }
       }
-    });
+    })();
   }, [sessionPath]);
+
+  // 3. 当前活跃会话的消息体按需加载（每个会话只加载一次）
+  useEffect(() => {
+    if (!sessionPath || !activeId || loadedConvIds.current.has(activeId)) return;
+    // 标记该会话已加载避免重入
+    const id = activeId;
+    loadedConvIds.current.add(activeId);
+    (async () => {
+      const literalMsgs = await loadLiteralMessages(id, "normal", sessionPath);
+      const memoryMsgs = await loadMemoryMessages(id, "normal", sessionPath);
+      if (literalMsgs || memoryMsgs) {
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  messages: literalMsgs ?? c.messages,
+                  memoryMessages: memoryMsgs ?? literalMsgs ?? c.messages,
+                }
+              : c,
+          ),
+        );
+        // 初始化 nextMsgId，避免新消息 ID 与已加载消息冲突
+        const msgsToScan = literalMsgs ?? [];
+        for (const msg of msgsToScan) {
+          const mId = parseInt(msg.id, 10);
+          if (mId >= nextMsgId) nextMsgId = mId + 1;
+        }
+        const memMsgsToScan = memoryMsgs ?? [];
+        for (const msg of memMsgsToScan) {
+          const mId = parseInt(msg.id, 10);
+          if (mId >= nextMsgId) nextMsgId = mId + 1;
+        }
+      }
+    })();
+  }, [sessionPath, activeId]);
 
   // Ref 持有最新会话列表和路径，供 handleSend 完成后写文件
   const conversationsRef = useRef(conversations);
@@ -123,7 +198,6 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const sessionPathRef = useRef(sessionPath);
   sessionPathRef.current = sessionPath;
 
-  const [activeId, setActiveId] = useState<string>(conversations[0].id);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const sidebarWidthRef = useRef(280);
@@ -177,6 +251,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         id: newId,
         title: makeConvTitle(prev, locale),
         messages: [],
+        memoryMessages: [],
         pinned: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -216,6 +291,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
           id: String(nextConvId++),
           title: makeConvTitle(conversations, locale),
           messages: [],
+          memoryMessages: [],
           pinned: false,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -242,6 +318,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
           id: String(nextConvId++),
           title: makeConvTitle(conversations, locale),
           messages: [],
+          memoryMessages: [],
           pinned: false,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -276,6 +353,11 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const [printOpen, setPrintOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<FileAttachment | null>(null);
   const [mode, setMode] = useState<Mode>("Chat");
+
+  // 同步工作状态到 getUnicodaStatus 模组
+  useEffect(() => {
+    updateUnicodaStatus({ panelMode, mode });
+  }, [panelMode, mode]);
 
   // ── Drag-and-drop file upload (Tauri native) ───────
   const [dragOver, setDragOver] = useState(false);
@@ -350,13 +432,31 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     })();
   }, []);
 
+  /**
+   * 消息更新辅助：同时对 messages（字面量）和 memoryMessages（记忆量）应用相同的变换。
+   * 在流式生成过程中，两个数组应保持同步；压缩时只修改 memoryMessages。
+   */
+  const withMsgUpdate = useCallback(
+    (conv: Conversation, msgMapper: (msgs: Message[]) => Message[]): Conversation => ({
+      ...conv,
+      messages: msgMapper(conv.messages),
+      memoryMessages: msgMapper(conv.memoryMessages ?? conv.messages),
+      updatedAt: Date.now(),
+    }),
+    [],
+  );
+
   // ── Compression state ────────────────────────────────────
   const [compressionEnabled, setCompressionEnabled] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
 
   // ── Send message + call model API ──────────────────────────────
 
-  /** 构建 API 消息列表（含 system prompt + 知识库，所有模式都注入基础身份） */
+  /**
+   * 构建 API 消息列表（含 system prompt + 知识库，所有模式都注入基础身份）。
+   * @param prevMessages 应从 conv.memoryMessages 传入（记忆量），
+   *   memoryMessages 是实际发送给模型的消息数据，可能已压缩。
+   */
   function buildApiMessages(
     prevMessages: Message[],
     userMsg: Message,
@@ -367,10 +467,10 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     // 所有模式都注入 system prompt（Agent 含完整模组协议+场景判断，Chat 含精简模组协议）
     let systemPrompt: string;
     if (sendMode === "Agent") {
-      systemPrompt = buildAgentSystemPrompt(sendMode, selectedModel?.systemPrompt);
+      systemPrompt = buildAgentSystemPrompt(sendMode, selectedModel?.systemPrompt, undefined, "normal", panelMode);
     } else {
       // Chat 模式：基础身份 + 精简低敏感模组文档 + 知识库
-      systemPrompt = buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt);
+      systemPrompt = buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt, undefined, "normal", panelMode);
     }
 
     // 追加压缩摘要
@@ -420,12 +520,8 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   ) {
     const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
 
-    // 先添加 user 消息
-    updateConv(activeId, (c) => ({
-      ...c,
-      messages: [...c.messages, userMsg],
-      updatedAt: Date.now(),
-    }));
+    // 先添加 user 消息（同步更新 messages 和 memoryMessages）
+    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
 
     let allToolResults: { role: string; content: string }[] = [];
     let complete = false;
@@ -444,11 +540,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         streaming: true,
       };
 
-      updateConv(activeId, (c) => ({
-        ...c,
-        messages: [...c.messages, placeholder],
-        updatedAt: Date.now(),
-      }));
+      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, placeholder]));
 
       let fullContent = "";
       let fullReasoning = "";
@@ -456,36 +548,53 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
       const apiMessages = [...initialApiMessages, ...allToolResults];
 
-      for await (const chunk of streamChatCompletion(
-        selectedModel!,
-        apiMessages,
-        abortController.signal,
-      )) {
-        fullContent += chunk.content;
-        fullReasoning += chunk.reasoningContent;
-        // 检测思考阶段结束：有 reasoning 积累后首次收到内容片段
-        if (!reasoningEnded && fullReasoning && chunk.content) {
-          reasoningEnded = true;
+      try {
+        for await (const chunk of streamChatCompletion(
+          selectedModel!,
+          apiMessages,
+          abortController.signal,
+        )) {
+          fullContent += chunk.content;
+          fullReasoning += chunk.reasoningContent;
+          // 检测思考阶段结束：有 reasoning 积累后首次收到内容片段
+          if (!reasoningEnded && fullReasoning && chunk.content) {
+            reasoningEnded = true;
+          }
+          // 剥离 <tool_call> 标签展示到 UI，同时检测是否正在发起工具调用
+          const displayContent = stripToolCalls(fullContent);
+          const hasToolCall = fullContent.includes("<tool_call");
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+            msgs.map((msg) =>
+              msg.id === assistantId
+                ? { ...msg, content: displayContent, toolCallInProgress: hasToolCall, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) }
+                : msg,
+            ),
+          ));
         }
-        updateConv(activeId, (c) => ({
-          ...c,
-          messages: c.messages.map((msg) =>
-            msg.id === assistantId
-              ? { ...msg, content: fullContent, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) }
-              : msg,
-          ),
-          updatedAt: Date.now(),
-        }));
+      } catch (streamErr) {
+        // 流式失败时，如果已有工具结果则视为完成，但不再吞掉错误
+        if (allToolResults.length > 0) {
+          const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
+          const displayContent = errMsg.startsWith("[API_ERROR:")
+            ? errMsg
+            : `**（上下文续传中断，工具结果已获取）**\n\n**实际错误:** ${errMsg}`;
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+            msgs.map((msg) =>
+              msg.id === assistantId ? { ...msg, content: displayContent, streaming: false } : msg,
+            ),
+          ));
+          complete = true;
+          continue;
+        }
+        throw streamErr;
       }
 
       // 标记当前 assistant 消息完成
-      updateConv(activeId, (c) => ({
-        ...c,
-        messages: c.messages.map((msg) =>
+      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+        msgs.map((msg) =>
           msg.id === assistantId ? { ...msg, streaming: false } : msg,
         ),
-        updatedAt: Date.now(),
-      }));
+      ));
 
       // 解析 tool call
       const toolCalls = parseToolCalls(fullContent);
@@ -493,26 +602,22 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         complete = true;
         const cleanContent = stripToolCalls(fullContent);
         if (cleanContent !== fullContent) {
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+            msgs.map((msg) =>
+              msg.id === assistantId ? { ...msg, content: cleanContent, toolCallInProgress: false } : msg,
             ),
-            updatedAt: Date.now(),
-          }));
+          ));
         }
       } else if (toolCallRound < MAX_CHAT_TOOL_ROUNDS) {
         // 先清理可见消息中的 <tool_call> 内容，避免 JSON 泄漏到 UI
         const cleanContent = stripToolCalls(fullContent);
-        if (cleanContent !== fullContent) {
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
-        }
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+          msgs.map((msg) =>
+            msg.id === assistantId
+              ? { ...msg, content: cleanContent !== fullContent ? cleanContent : msg.content, toolCallInProgress: true }
+              : msg,
+          ),
+        ));
         toolCallRound++;
 
         // ── 开发者模式：在 assistant 消息上记录调试信息 ──
@@ -521,19 +626,25 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             round: toolCallRound - 1,
             rawToolCall: JSON.stringify({ id: c.id, params: c.params }, null, 2),
           }));
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+            msgs.map((msg) =>
               msg.id === assistantId ? { ...msg, toolDebugInfo: debugEntries } : msg,
             ),
-            updatedAt: Date.now(),
-          }));
+          ));
         }
 
         // 执行所有 tool call（记录耗时以便开发者模式展示）
+        // 将 assistant 的 tool call 消息加入上下文，让模型知道这是它自己的调用结果
         const MIN_TOOL_INTERVAL_MS = 500;
         const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
         const toolResults: { result: import("./services/agentEngine").ToolResult; durationMs: number }[] = [];
+        allToolResults.push({ role: "assistant", content: fullContent });
+        // 工具开始执行，移除"正在发起工具调用"占位
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+          msgs.map((msg) =>
+            msg.id === assistantId ? { ...msg, toolCallInProgress: false } : msg,
+          ),
+        ));
         for (const call of toolCalls) {
           const startTime = performance.now();
           const result = await executeToolCall(call, abortController.signal, selectedModel);
@@ -568,9 +679,8 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
         // ── 开发者模式：更新 assistant 消息上的调试信息（填入执行结果） ──
         if (developerMode && toolResults.length > 0) {
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+            msgs.map((msg) =>
               msg.id === assistantId && msg.toolDebugInfo
                 ? {
                     ...msg,
@@ -583,21 +693,20 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
                   }
                 : msg,
             ),
-            updatedAt: Date.now(),
-          }));
+          ));
         }
+        // 工具执行完后短暂等待再发起续传，给后端时间释放资源
+        await new Promise((r) => setTimeout(r, 200));
       } else {
         // 超过最大工具调用轮数，不再执行，但清除 <tool_call> 标签
         complete = true;
         const cleanContent = stripToolCalls(fullContent);
         if (cleanContent) {
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+            msgs.map((msg) =>
               msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
             ),
-            updatedAt: Date.now(),
-          }));
+          ));
         }
       }
     }
@@ -648,26 +757,48 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
       const apiMessages = [...initialApiMessages, ...allToolResults];
 
-      for await (const chunk of streamChatCompletion(
-        selectedModel!,
-        apiMessages,
-        abortController.signal,
-      )) {
-        fullContent += chunk.content;
-        fullReasoning += chunk.reasoningContent;
-        // 检测思考阶段结束：有 reasoning 积累后首次收到内容片段
-        if (!reasoningEnded && fullReasoning && chunk.content) {
-          reasoningEnded = true;
+      try {
+        for await (const chunk of streamChatCompletion(
+          selectedModel!,
+          apiMessages,
+          abortController.signal,
+        )) {
+          fullContent += chunk.content;
+          fullReasoning += chunk.reasoningContent;
+          // 检测思考阶段结束：有 reasoning 积累后首次收到内容片段
+          if (!reasoningEnded && fullReasoning && chunk.content) {
+            reasoningEnded = true;
+          }
+          const displayContent = stripToolCalls(fullContent);
+          const hasToolCall = fullContent.includes("<tool_call");
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId
+                ? { ...msg, content: displayContent, toolCallInProgress: hasToolCall, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) }
+                : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
         }
-        updateConv(activeId, (c) => ({
-          ...c,
-          messages: c.messages.map((msg) =>
-            msg.id === assistantId
-              ? { ...msg, content: fullContent, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) }
-              : msg,
-          ),
-          updatedAt: Date.now(),
-        }));
+      } catch (streamErr) {
+        // 流式失败时，如果已有工具结果则视为完成，但不再吞掉错误
+        if (allToolResults.length > 0) {
+          const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
+          const displayContent = errMsg.startsWith("[API_ERROR:")
+            ? errMsg
+            : `**（上下文续传中断，工具结果已获取）**\n\n**实际错误:** ${errMsg}`;
+          updateConv(activeId, (c) => ({
+            ...c,
+            messages: c.messages.map((msg) =>
+              msg.id === assistantId ? { ...msg, content: displayContent, streaming: false } : msg,
+            ),
+            updatedAt: Date.now(),
+          }));
+          conversionComplete = true;
+          continue;
+        }
+        throw streamErr;
       }
 
       // 标记当前 assistant 消息完成
@@ -691,7 +822,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
           updateConv(activeId, (c) => ({
             ...c,
             messages: c.messages.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
+              msg.id === assistantId ? { ...msg, content: cleanContent, toolCallInProgress: false } : msg,
             ),
             updatedAt: Date.now(),
           }));
@@ -699,15 +830,15 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
       } else {
         // 先清理可见消息中的 <tool_call> 内容，避免 JSON 泄漏到 UI
         const cleanContent = stripToolCalls(fullContent);
-        if (cleanContent !== fullContent) {
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
-        }
+        updateConv(activeId, (c) => ({
+          ...c,
+          messages: c.messages.map((msg) =>
+            msg.id === assistantId
+              ? { ...msg, content: cleanContent !== fullContent ? cleanContent : msg.content, toolCallInProgress: true }
+              : msg,
+          ),
+          updatedAt: Date.now(),
+        }));
         // ── 开发者模式：在 assistant 消息上记录调试信息 ──
         if (developerMode) {
           const debugEntries: import("./types").ToolDebugEntry[] = toolCalls.map((c) => ({
@@ -724,9 +855,19 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         }
 
         // 执行所有 tool call（记录耗时以便开发者模式展示）
+        // 将 assistant 的 tool call 消息加入上下文，让模型知道这是它自己的调用结果
         const MIN_TOOL_INTERVAL_MS = 500;
         const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
         const toolResults: { result: import("./services/agentEngine").ToolResult; durationMs: number }[] = [];
+        allToolResults.push({ role: "assistant", content: fullContent });
+        // 工具开始执行，移除"正在发起工具调用"占位
+        updateConv(activeId, (c) => ({
+          ...c,
+          messages: c.messages.map((msg) =>
+            msg.id === assistantId ? { ...msg, toolCallInProgress: false } : msg,
+          ),
+          updatedAt: Date.now(),
+        }));
         for (const call of toolCalls) {
           const startTime = performance.now();
           const result = await executeToolCall(call, abortController.signal, selectedModel);
@@ -779,6 +920,8 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             updatedAt: Date.now(),
           }));
         }
+        // 工具执行完后短暂等待再发起续传，给后端时间释放资源
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
   }
@@ -844,7 +987,8 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
       };
 
       const currentConv = conversations.find((c) => c.id === activeId);
-      const prevMessages = currentConv?.messages ?? [];
+      // 使用 memoryMessages（记忆量）作为模型输入消息；若无则回退到 literals
+      const prevMessages = currentConv?.memoryMessages ?? currentConv?.messages ?? [];
 
       // 判断是否需要自动标题：全新会话（无消息）且未标记过
       const needsAutoTitle = currentConv
@@ -966,17 +1110,18 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
   const handleCompressNow = useCallback(async () => {
     if (!activeConv || !selectedModel || isCompressing) return;
-    if (activeConv.messages.length < MIN_MESSAGES_FOR_COMPRESSION) return;
+    const targetMsgs = activeConv.memoryMessages ?? activeConv.messages;
+    if (targetMsgs.length < MIN_MESSAGES_FOR_COMPRESSION) return;
     setIsCompressing(true);
     try {
       const result = await compressConversation(
-        activeConv.messages,
+        targetMsgs,
         selectedModel,
       );
       if (result.summary) {
         updateConv(activeId!, (c) => ({
           ...c,
-          messages: result.messages,
+          memoryMessages: result.messages,
           updatedAt: Date.now(),
         }));
       }
@@ -997,8 +1142,6 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         const g = printGuardRef.current;
         if (g.isLocked) {
           showToast("Unicoda 已锁定，请先解锁");
-        } else if (g.panelMode === "Yolo") {
-          showToast("Yolo 窗口不支持打印");
         } else if (g.settingsOpen) {
           showToast("设置界面不支持打印");
         } else if (g.componentsOpen) {
@@ -1207,6 +1350,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
                   onStop={handleStop}
                   disabled={isStreaming}
                   messages={activeConv.messages}
+                  memoryMessages={activeConv.memoryMessages ?? activeConv.messages}
                   maxTokens={selectedModel?.params?.maxTokens}
                   compressionEnabled={compressionEnabled}
                   onToggleCompression={handleToggleCompression}

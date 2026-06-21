@@ -253,22 +253,39 @@ export default function PrintDialog({
   );
 
   const handleExport = useCallback(
-    (format: "txt" | "md") => {
+    async (format: "txt" | "md") => {
       setShowExportMenu(false);
       const content = buildExportContent(format);
       if (!content) return;
 
       const ext = format === "txt" ? "txt" : "md";
-      const mimeType = format === "txt" ? "text/plain" : "text/markdown";
-      const blob = new Blob([content], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Unicoda_会话导出_${new Date().toISOString().slice(0, 10)}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const defaultName = `Unicoda_会话导出_${new Date().toISOString().slice(0, 10)}.${ext}`;
+
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const filePath = await save({
+          defaultPath: defaultName,
+          filters: [
+            { name: format === "txt" ? "Text File" : "Markdown File", extensions: [ext] },
+          ],
+        });
+        if (!filePath) return; // 用户取消
+
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("write_text_file_at", { path: filePath, data: "\uFEFF" + content });
+      } catch {
+        // 降级：浏览器 Blob 下载
+        const mimeType = format === "txt" ? "text/plain" : "text/markdown";
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = defaultName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
     },
     [buildExportContent],
   );
@@ -284,6 +301,15 @@ export default function PrintDialog({
   const allSelected = allVisible.length > 0 && allVisible.every((m) => selectedIds.has(m.id));
   const selectedCount = selectedIds.size;
 
+  // 根据设置过滤显示的消息（需在 toggleSelect 之前定义，避免 TDZ）
+  const displayMessages = messages.filter((m) => {
+    if (m.role === "system") return false;
+    if (m.role === "assistant" && m.content.startsWith("[对话历史摘要]")) return false;
+    if (hideToolCalls && m.role === "tool") return false;
+    if (hideDebugInfo && m.role === "assistant" && m.toolDebugInfo && m.toolDebugInfo.length > 0) return false;
+    return true;
+  });
+
   const toggleSelect = useCallback(
     (id: string, index: number, shiftKey: boolean) => {
       setSelectedIds((prev) => {
@@ -296,12 +322,12 @@ export default function PrintDialog({
           const isCurrentlySelected = prev.has(id);
 
           for (let i = start; i <= end; i++) {
-            const msg = messages[i];
-            if (msg.role === "user" || msg.role === "assistant") {
+            const m = displayMessages[i];
+            if (m) {
               if (isCurrentlySelected) {
-                next.add(msg.id);
+                next.add(m.id);
               } else {
-                next.delete(msg.id);
+                next.delete(m.id);
               }
             }
           }
@@ -318,7 +344,7 @@ export default function PrintDialog({
         return next;
       });
     },
-    [lastClickedIdx, messages],
+    [lastClickedIdx, displayMessages],
   );
 
   // 处理按住 Shift 点击时的 lastClickedIdx 更新（需在 toggleSelect 之外）
@@ -582,15 +608,6 @@ export default function PrintDialog({
     printWindow.focus();
     setTimeout(() => printWindow.print(), 300);
   }, [messages, selectedIds, modelName, userName, hideToolCalls, hideDebugInfo, renderMarkdown, getPrintStyles, showReasoning, showModelInfo, showUnisonInfo, showAnchors]);
-
-  // 根据设置过滤显示的消息
-  const displayMessages = messages.filter((m) => {
-    if (m.role === "system") return false;
-    if (m.role === "assistant" && m.content.startsWith("[对话历史摘要]")) return false;
-    if (hideToolCalls && m.role === "tool") return false;
-    if (hideDebugInfo && m.role === "assistant" && m.toolDebugInfo && m.toolDebugInfo.length > 0) return false;
-    return true;
-  });
 
   return (
     <div
@@ -857,7 +874,7 @@ export default function PrintDialog({
               <div
                 key={msg.id}
                 className={`print-message-row ${isSelected ? "selected" : ""}`}
-                onClick={(e) => handleClick(msg.id, messages.indexOf(msg), e.shiftKey)}
+                onClick={(e) => handleClick(msg.id, index, e.shiftKey)}
               >
                 <input
                   type="checkbox"

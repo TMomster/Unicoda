@@ -43,17 +43,25 @@ export interface Message {
   toolDebugInfo?: ToolDebugEntry[];
   /** 上传的文件附件 */
   files?: FileAttachment[];
+  /** 正在发起工具调用中（仅 assistant 消息，content 中已剥离 <tool_call> 标签） */
+  toolCallInProgress?: boolean;
 }
 
 export interface Conversation {
   id: string;
   title: string;
+  /** 字面量消息数组：用户界面上看到的完整消息记录，永不压缩 */
   messages: Message[];
+  /** 记忆量消息数组：实际发送给模型的消息记录。可能被压缩（不同于 messages），
+   * 如果为 undefined 则回退使用 messages。 */
+  memoryMessages?: Message[];
   pinned: boolean;
   createdAt: number;
   updatedAt: number;
   /** 是否已完成自动标题生成（仅在新会话第一次对话完成后触发一次） */
   autoTitleDone?: boolean;
+  /** Yolo 模式下每个会话独立记录的工作区路径。为空时使用全局 sessionPath。 */
+  workspacePath?: string;
 }
 
 export interface ModelParams {

@@ -8,7 +8,7 @@
  * 4. 若有 tool call，执行并在上下文中注入结果
  * 5. 二次调用 LLM 产最终回复
  */
-import type { Mode, ModelConfig } from "../types";
+import type { Mode, PanelMode, ModelConfig } from "../types";
 import { getAllModules, getModule } from "../modules/registry";
 import { getModulesForMode } from "../modules/types";
 import { formatKnowledgeForPrompt } from "./knowledgeBase";
@@ -48,24 +48,46 @@ function formatModuleParamsDoc(
 }
 
 // ─── 知识库注入 ──────────────────────────────────────────────────
+import type { KnowledgeMode } from "./knowledgeBase";
 
 /**
  * 构建知识库段落，将预装填知识库注入到系统提示词中。
+ * @param kbMode  知识库层级过滤（framework 全部可见，normal/yolo 各自可见）
  */
-function buildKnowledgeSection(): string {
-  return formatKnowledgeForPrompt();
+function buildKnowledgeSection(kbMode?: KnowledgeMode): string {
+  return formatKnowledgeForPrompt(kbMode);
 }
 
 /**
  * 构建 Agent 系统提示词，注入 Unicoda 身份认知与模组知识库。
  * @param mode  当前对话模式
  * @param customPrompt  用户自定义的 system prompt（可选）
+ * @param workspacePath  当前工作区路径（Yolo 模式每个会话独立记录）
+ * @param kbMode  知识库层级过滤（未传则仅 framework 级别可见）
+ * @param panelMode  工作模式（Default / Yolo），用于筛选 scope 匹配的模组
  */
 export function buildAgentSystemPrompt(
   mode: Mode,
   customPrompt?: string,
+  workspacePath?: string,
+  kbMode?: KnowledgeMode,
+  panelMode?: PanelMode,
 ): string {
   const parts: string[] = [];
+
+  // ═══════════════════════════════════════════════════════════
+  // 第 1 部分：Unicoda 基础角色设定（所有模式均注入）
+  // ═══════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════
+  // 工作区上下文注入（Yolo 模式专用）
+  // ═══════════════════════════════════════════════════════════
+  if (workspacePath) {
+    parts.push(`## 当前工作区
+
+你正在处理的工作区路径是：\`${workspacePath}\`
+
+当你需要搜索项目文件（\`search_in_project\`）、分析项目结构（\`get_project_review\`）、执行命令（\`execute_command\`）或浏览文件（\`read_from_files\`）时，可以在此工作区路径下操作。如果用户指定了其他路径，优先使用用户指定的路径。`);
+  }
 
   // ═══════════════════════════════════════════════════════════
   // 第 1 部分：Unicoda 基础角色设定（所有模式均注入）
@@ -80,7 +102,7 @@ export function buildAgentSystemPrompt(
   // Agent：注入全部模组 + 完整协议 + 场景判断
   // Chat：  仅注入普通模组 + 简化调用协议
   // ═══════════════════════════════════════════════════════════
-  const relevantMods = getModulesForMode(getAllModules(), mode);
+  const relevantMods = getModulesForMode(getAllModules(), mode, panelMode);
 
   if (relevantMods.length > 0) {
     if (mode === "Agent") {
@@ -306,7 +328,17 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
 4. **\`read_from_files\`**：用户询问本地文件、想浏览目录、查看或读取某个文件时使用
    - 适用于：用户问"看看我的桌面有什么"、"帮我打开这个文件"、"当前在什么路径"、"进入某个目录"
    - 用户问"当前目录有什么文件"时，先用 \`pwd\` 获取当前路径，再调用 \`list_dir\`
-   - 用户说"读取/查看某个文件"时，调用 \`read_file\``);
+   - 用户说"读取/查看某个文件"时，调用 \`read_file\`
+
+5. **\`search_in_project\`**：在本地项目中搜索文件名或文件内容
+   - 适用于：搜索函数定义、变量引用、TODO 标记、导入语句
+   - 用户说"帮我找找项目中哪里用到了XXX"、"搜索XXX关键词"时调用
+   - 支持 \`pattern\` 参数筛选文件类型（如 \`"*.ts"\` 只搜索 TypeScript 文件）
+
+6. **\`get_project_review\`**：分析项目整体结构
+   - 适用于：了解新项目的技术栈、查看项目架构、分析代码库结构
+   - 用户说"帮我看看这个项目是做什么的"、"分析一下项目结构"时调用
+   - 会读取关键配置文件（package.json、Cargo.toml 等）并展示目录树`);
 
     // ── 调用规则（两种模式共享） ──
     parts.push(`## 调用规则
@@ -372,6 +404,7 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
 - 用户询问通用知识（在你的训练数据范围内）
 - 用户要求创意写作、代码编写、翻译、润色等不需要实时信息的工作
 - 用户明确要求不要联网
+- **用户询问 Unicoda 自身功能**（界面按钮、面板、设置项等）——这些信息已在本提示词的知识库章节中提供，直接回答即可，不要联网搜索
 
 ### 📂 什么时候应该调用文件读取模组？
 
@@ -450,7 +483,7 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
   // ═══════════════════════════════════════════════════════════
   // 预装填知识库（所有模式均注入）
   // ═══════════════════════════════════════════════════════════
-  const kbSection = buildKnowledgeSection();
+  const kbSection = buildKnowledgeSection(kbMode);
   if (kbSection) parts.push(kbSection);
 
   // ═══════════════════════════════════════════════════════════
@@ -491,10 +524,18 @@ export function parseToolCalls(text: string): ToolCall[] {
 }
 
 /**
- * 从文本中移除 <tool_call> 块，返回干净的回复内容。
+ * 从文本中移除 <tool_call> 块（完整或部分标签），返回干净的回复内容。
+ * 流式传输期间会收到不完整的标签（如 `<tool_c`），也需要移除。
  */
 export function stripToolCalls(text: string): string {
-  return text.replace(TOOL_CALL_RE, "").trim();
+  // 先移除完整的 <tool_call>...</tool_call> 块
+  let result = text.replace(TOOL_CALL_RE, "").trim();
+  // 再移除流式传输中不完整/部分的 <tool_call 标签（从匹配位置到末尾）
+  const partialIdx = result.indexOf("<tool_call");
+  if (partialIdx !== -1) {
+    result = result.substring(0, partialIdx).trim();
+  }
+  return result;
 }
 
 // ─── Tool Call 执行 ───────────────────────────────────
@@ -521,7 +562,7 @@ export async function executeToolCall(
 
   // 对于 summary_page 模组，注入模型配置以便内部调用 LLM
   const params = { ...call.params };
-  if (call.id === "summary_page" && modelConfig) {
+  if ((call.id === "summary_page" || call.id === "check_api_balance") && modelConfig) {
     params._modelApiKey = modelConfig.apiKey;
     params._modelName = modelConfig.modelName;
     params._modelBaseUrl = modelConfig.baseUrl || "";

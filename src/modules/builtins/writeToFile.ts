@@ -24,6 +24,7 @@ const mod: Module = {
     "- write（默认）：创建新文件或覆盖已有文件\n" +
     "- append：将内容追加到已有文件末尾（文件不存在时会自动创建）\n\n" +
     "⚠️ 本模组具有文件写入能力，请在确认用户意图后再使用。写入路径请使用绝对路径。",
+  userDescription: "在本地文件系统中创建或覆盖文件（敏感操作）",
   level: "sensitive",
   parameters: [
     {
