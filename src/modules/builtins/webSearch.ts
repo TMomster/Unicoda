@@ -22,6 +22,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { readConfigFile } from "../../utils/configStorage";
 import type { SearxngConfig } from "../../contexts/SearchContext";
 
+// ── 联网搜索权限检查 ──
+
+/** 从主题配置中读取联网搜索权限状态 */
+async function isInternetSearchEnabled(): Promise<boolean> {
+  try {
+    const themeConfig = await readConfigFile<{ internetSearchEnabled?: boolean }>(
+      "unicoda-theme",
+      { internetSearchEnabled: true },
+    );
+    return themeConfig.internetSearchEnabled !== false;
+  } catch {
+    return true;
+  }
+}
+
 interface SearchResult {
   title: string;
   url: string;
@@ -609,6 +624,16 @@ const mod: Module = {
       return;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // 联网搜索权限检查：如果用户在设置中关闭了联网搜索权限，
+    // 直接返回拒绝提示，让模型据此向用户解释并引导操作
+    // ═══════════════════════════════════════════════════════════════
+    const searchPermission = await isInternetSearchEnabled();
+    if (!searchPermission) {
+      yield "【联网搜索权限已关闭】用户在 Unicoda 设置中关闭了「联网搜索权限」，web_search 模组无法执行。请告知用户：可以在设置面板中找到「联网搜索权限」开关并开启，或选择让 AI 根据自身已有知识回答。";
+      return;
+    }
+
     const count = Math.min(Math.max(parseInt(params.count) || 5, 1), 10);
     const language = (params.language === "" ? "zh-CN" : (params.language || "zh-CN")).trim();
     const excludeSites = params.excludeSites
@@ -631,7 +656,17 @@ const mod: Module = {
         yield formatResults(results);
       }
     } catch (err) {
-      yield `搜索失败: ${err instanceof Error ? err.message : String(err)}`;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const lowMsg = errMsg.toLowerCase();
+
+      // SearXNG 连接失败时给出更友好的提示
+      if (lowMsg.includes("refused") || lowMsg.includes("connection refused")) {
+        yield `❌ SearXNG 连接失败：实例地址 ${searxngConfig?.baseUrl || "未配置"} 拒绝连接。\n\n可能的原因：\n1. SearXNG 服务未启动 — 请确认已运行 docker run 命令启动容器\n2. SearXNG 实例地址不正确 — 请在设置面板中检查实例地址\n3. SearXNG 实例端口或地址发生变化\n\n建议：\n• 检查 SearXNG 服务是否正常运行\n• 在设置面板中测试连接以确认配置正确\n• 如不需要 SearXNG，可在设置面板中关闭 SearXNG 开关以使用 Bing 搜索`;
+      } else if (lowMsg.includes("timeout")) {
+        yield `❌ SearXNG 连接超时：无法连接到 ${searxngConfig?.baseUrl || "未配置"}。\n\n可能的原因：\n1. SearXNG 服务未正常启动\n2. 网络连接存在问题\n3. 实例地址不正确\n\n建议：\n• 在设置面板中测试连接\n• 确认 SearXNG 服务已启动并在正常运行\n• 如不需要 SearXNG，可在设置面板中关闭 SearXNG 开关以使用 Bing 搜索`;
+      } else {
+        yield `搜索失败: ${errMsg}`;
+      }
     }
   },
 };

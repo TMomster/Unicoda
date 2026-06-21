@@ -1,6 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { Conversation, FileAttachment, Message, Mode, PanelMode, ModelConfig } from "./types";
 import { useTheme, scaleToTransform } from "./contexts/ThemeContext";
@@ -8,22 +5,17 @@ import { useModels } from "./contexts/ModelContext";
 import { ModelProvider } from "./contexts/ModelContext";
 import { LockProvider } from "./contexts/LockContext";
 import { SearchProvider } from "./contexts/SearchContext";
-import { streamChatCompletion } from "./services/modelApi";
-import { readConfigFile } from "./utils/configStorage";
-import { playNotificationSound } from "./utils/notificationSound";
+import { useChatStream, setNextMsgId } from "./hooks/useChatStream";
+import { readConfigFile, writeConfigFile } from "./utils/configStorage";
 import { initBuiltinModules } from "./modules/registry";
 import { updateUnicodaStatus } from "./modules/builtins/getUnicodaStatus";
 import {
-  buildAgentSystemPrompt,
-  parseToolCalls,
-  stripToolCalls,
-  executeToolCall,
-} from "./services/agentEngine";
-import {
-  compressConversation,
-  MIN_MESSAGES_FOR_COMPRESSION,
-  hasCompressionSummary,
-} from "./services/conversationCompression";
+  APP_VERSION,
+  VERSION_STORAGE_KEY,
+  compareVersions,
+  UPDATE_CHANGELOG,
+  type VersionRecord,
+} from "./version";
 import {
   loadMetadata,
   loadLiteralMessages,
@@ -46,30 +38,14 @@ import YoloPanel from "./components/YoloPanel";
 import PrintDialog from "./components/PrintDialog";
 import FilePreviewPanel from "./components/FilePreviewPanel";
 
-/** 将全部会话数据写入文件（仅流式完成后调用） */
-let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
-function flushConversations(convs: Conversation[], path: string) {
-  // 异步落盘，使用防抖避免频繁 I/O
-  if (pendingFlushTimer) clearTimeout(pendingFlushTimer);
-  pendingFlushTimer = setTimeout(async () => {
-    pendingFlushTimer = null;
-    await flushConversationData(convs, "normal", path);
-    // localStorage 缓存元数据（不含消息体，仅作快速读取）
-    const metas = convs.map(toMeta);
-    try {
-      localStorage.setItem("unicoda-conversations-meta", JSON.stringify(metas));
-    } catch { /* ignore */ }
-  }, 100);
-}
-
 let nextConvId = 1;
 let nextMsgId = 1;
 
 const MIN_SIDEBAR = 200;
 
 function makeConvTitle(existing: Conversation[], locale: string): string {
-  const prefix = locale === "en-US" ? "New Session" : "新会话";
-  const pattern = locale === "en-US" ? /^New Session-(\d+)$/ : /^新会话-(\d+)$/;
+  const prefix = locale === "zh-CN" ? "新会话" : locale === "de-DE" ? "Neue Sitzung" : "New Session";
+  const pattern = locale === "zh-CN" ? /^新会话-(\d+)$/ : locale === "de-DE" ? /^Neue Sitzung-(\d+)$/ : /^New Session-(\d+)$/;
   const nums = new Set<number>();
   for (const c of existing) {
     const m = c.title.match(pattern);
@@ -82,7 +58,7 @@ function makeConvTitle(existing: Conversation[], locale: string): string {
 
 // ─── Inner component that has access to ModelProvider context ──────
 function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPanelMode: React.Dispatch<React.SetStateAction<PanelMode>> }) {
-  const { scale, fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode, theme } = useTheme();
+  const { scale, fontFamily, t, locale, preferredLanguage, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode, theme } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     // 快速初始加载：优先用 localStorage 缓存的元数据
@@ -117,41 +93,42 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     ];
   });
 
-  const [activeId, setActiveId] = useState<string>(conversations[0].id);
+  const [activeId, setActiveId] = useState<string>("");
+
+  // ── 版本检查对话框 ──
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [showDowngradeDialog, setShowDowngradeDialog] = useState(false);
 
   // 异步初始化：迁移旧格式 + 从文件加载消息体
   const initialLoadDone = useRef(false);
   const loadedConvIds = useRef(new Set<string>());
   useEffect(() => {
     if (initialLoadDone.current) return;
+    if (!sessionPath) return; // sessionPath 尚未就绪，等待下次触发
     initialLoadDone.current = true;
 
     (async () => {
       // 1. 尝试迁移旧格式
-      if (sessionPath) {
-        await migrateFromOldFormat("unicoda-conversations", "normal", sessionPath);
-      }
+      await migrateFromOldFormat("unicoda-conversations", "normal", sessionPath);
 
       // 2. 加载元数据（覆盖 localStorage 缓存）
-      if (sessionPath) {
-        const freshMetas = await loadMetadata("normal", sessionPath);
-        if (freshMetas.length > 0) {
-          const loaded: Conversation[] = freshMetas.map((m) => ({
-            ...m,
-            messages: [],
-            memoryMessages: [],
-          }));
-          for (const c of loaded) {
-            const idNum = parseInt(c.id, 10);
-            if (idNum >= nextConvId) nextConvId = idNum + 1;
-          }
-          setConversations(loaded);
-          // 更新 localStorage 缓存
-          try {
-            localStorage.setItem("unicoda-conversations-meta", JSON.stringify(freshMetas));
-          } catch { /* ignore */ }
-          return; // 等待 activeConv 加载
+      const freshMetas = await loadMetadata("normal", sessionPath);
+      if (freshMetas.length > 0) {
+        const loaded: Conversation[] = freshMetas.map((m) => ({
+          ...m,
+          messages: [],
+          memoryMessages: [],
+        }));
+        for (const c of loaded) {
+          const idNum = parseInt(c.id, 10);
+          if (idNum >= nextConvId) nextConvId = idNum + 1;
         }
+        setConversations(loaded);
+        // 更新 localStorage 缓存
+        try {
+          localStorage.setItem("unicoda-conversations-meta", JSON.stringify(freshMetas));
+        } catch { /* ignore */ }
+        return; // 等待 activeConv 加载
       }
     })();
   }, [sessionPath]);
@@ -179,15 +156,10 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         );
         // 初始化 nextMsgId，避免新消息 ID 与已加载消息冲突
         const msgsToScan = literalMsgs ?? [];
-        for (const msg of msgsToScan) {
-          const mId = parseInt(msg.id, 10);
-          if (mId >= nextMsgId) nextMsgId = mId + 1;
-        }
         const memMsgsToScan = memoryMsgs ?? [];
-        for (const msg of memMsgsToScan) {
-          const mId = parseInt(msg.id, 10);
-          if (mId >= nextMsgId) nextMsgId = mId + 1;
-        }
+        const allIds = [...msgsToScan, ...memMsgsToScan].map(m => parseInt(m.id, 10));
+        const maxId = allIds.length > 0 ? Math.max(...allIds) : 0;
+        setNextMsgId(maxId);
       }
     })();
   }, [sessionPath, activeId]);
@@ -227,12 +199,9 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     setTimeout(() => { setIsTransitioning(false); }, 1100);
   }, [isTransitioning, panelMode]);
 
-  // ── Model + streaming state ─────────────────────────────────────
+  // ── Model ───────────────────────────────────────────────────────
   const { models, selectedModelId } = useModels();
   const selectedModel = models.find((m) => m.id === selectedModelId);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const streamingMsgIdRef = useRef<string | null>(null);
 
   // Helper to update conversation messages
   const updateConv = useCallback(
@@ -285,6 +254,9 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
   const handleDelete = useCallback(
     (id: string) => {
+      if (sessionPath) {
+        deleteConversationFiles(id, "normal", sessionPath).catch(() => {});
+      }
       const next = conversations.filter((c) => c.id !== id);
       if (next.length === 0) {
         const fresh: Conversation = {
@@ -303,7 +275,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         setConversations(() => next);
       }
       if (activeId === id) {
-        setActiveId(next.length === 0 ? String(nextConvId) : next[0].id);
+        setActiveId("");
       }
     },
     [activeId, conversations, locale, sessionPath],
@@ -311,6 +283,11 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
   const handleBatchDelete = useCallback(
     (ids: string[]) => {
+      ids.forEach((id) => {
+        if (sessionPath) {
+          deleteConversationFiles(id, "normal", sessionPath).catch(() => {});
+        }
+      });
       const idSet = new Set(ids);
       const next = conversations.filter((c) => !idSet.has(c.id));
       if (next.length === 0) {
@@ -330,7 +307,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         setConversations(() => next);
       }
       if (ids.includes(activeId)) {
-        setActiveId(next.length === 0 ? String(nextConvId) : next[0].id);
+        setActiveId("");
       }
     },
     [activeId, conversations, locale, sessionPath],
@@ -359,55 +336,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     updateUnicodaStatus({ panelMode, mode });
   }, [panelMode, mode]);
 
-  // ── Drag-and-drop file upload (Tauri native) ───────
-  const [dragOver, setDragOver] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<FileAttachment[]>([]);
-  const isStreamingRef = useRef(isStreaming);
-  useEffect(() => {
-    isStreamingRef.current = isStreaming;
-  });
-
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
-        const p = event.payload;
-        if (p.type === "enter" || p.type === "over") {
-          setDragOver(true);
-        } else if (p.type === "leave") {
-          setDragOver(false);
-        } else if (p.type === "drop") {
-          setDragOver(false);
-          if (isStreamingRef.current) return;
-          interface FileContent { data: string; mime_type: string; is_image: boolean; size: number; name: string; }
-          const allowed: FileAttachment[] = [];
-          for (const filePath of p.paths) {
-            try {
-              const content: FileContent = await invoke("read_file_content", { path: filePath });
-              if (content.is_image) continue; // 跳过图片（与 InputBar 一致）
-              if (content.size > 10 * 1024 * 1024) continue;
-              allowed.push({
-                id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                name: content.name,
-                size: content.size,
-                mimeType: content.mime_type,
-                data: content.data,
-                isImage: content.is_image,
-              });
-            } catch { /* skip failed reads */ }
-          }
-          if (allowed.length > 0) {
-            setPendingFiles((prev) => [...prev, ...allowed]);
-          }
-        }
-      });
-    })();
-    return () => { if (unlisten) unlisten(); };
-  }, []);
-
-  const handleRemovePendingFile = useCallback((fileId: string) => {
-    setPendingFiles((prev) => prev.filter((f) => f.id !== fileId));
-  }, []);
+  // ── Drag-and-drop 已移至 useChatStream hook ───────
 
   // ── Toast notifications ─────────────────────────────
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
@@ -424,12 +353,48 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const { isLocked } = useLock();
   useEffect(() => {
     initBuiltinModules();
-    // 请求系统通知权限（通过 Tauri 插件注册 AppUserModelId）
-    (async () => {
-      if (!(await isPermissionGranted())) {
-        await requestPermission();
+    // 版本检查
+    performVersionCheck();
+  }, []);
+
+  // ── 版本检查逻辑 ─────────────────────────────────
+  const performVersionCheck = useCallback(async () => {
+    try {
+      const record: VersionRecord | null = await readConfigFile<VersionRecord | null>(
+        VERSION_STORAGE_KEY,
+        null,
+      );
+      if (!record) {
+        // 首次运行：记录当前版本，不弹窗
+        await writeConfigFile(VERSION_STORAGE_KEY, {
+          version: APP_VERSION,
+          downgradeDismissed: false,
+        } satisfies VersionRecord);
+        return;
       }
-    })();
+      const cmp = compareVersions(APP_VERSION, record.version);
+      if (cmp === 0) {
+        // 版本一致：无需处理
+        return;
+      }
+      if (cmp === 1) {
+        // 当前版本更高 → 升级，存储新版本号并显示更新公告
+        await writeConfigFile(VERSION_STORAGE_KEY, {
+          version: APP_VERSION,
+          downgradeDismissed: false,
+        } satisfies VersionRecord);
+        setShowUpdateDialog(true);
+        return;
+      }
+      // cmp === -1 → 当前版本低于已记录的版本
+      if (record.downgradeDismissed) {
+        // 用户已勾选"不再提醒"
+        return;
+      }
+      setShowDowngradeDialog(true);
+    } catch {
+      // 静默忽略
+    }
   }, []);
 
   /**
@@ -446,635 +411,53 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     [],
   );
 
-  // ── Compression state ────────────────────────────────────
-  const [compressionEnabled, setCompressionEnabled] = useState(false);
-  const [isCompressing, setIsCompressing] = useState(false);
-
-  // ── Send message + call model API ──────────────────────────────
-
-  /**
-   * 构建 API 消息列表（含 system prompt + 知识库，所有模式都注入基础身份）。
-   * @param prevMessages 应从 conv.memoryMessages 传入（记忆量），
-   *   memoryMessages 是实际发送给模型的消息数据，可能已压缩。
-   */
-  function buildApiMessages(
-    prevMessages: Message[],
-    userMsg: Message,
-    sendMode: Mode,
-  ): { role: string; content: string }[] {
-    const result: { role: string; content: string }[] = [];
-
-    // 所有模式都注入 system prompt（Agent 含完整模组协议+场景判断，Chat 含精简模组协议）
-    let systemPrompt: string;
-    if (sendMode === "Agent") {
-      systemPrompt = buildAgentSystemPrompt(sendMode, selectedModel?.systemPrompt, undefined, "normal", panelMode);
-    } else {
-      // Chat 模式：基础身份 + 精简低敏感模组文档 + 知识库
-      systemPrompt = buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt, undefined, "normal", panelMode);
-    }
-
-    // 追加压缩摘要
-    const kbExtra = prevMessages.find(
-      (m) => m.role === "assistant" && m.content.startsWith("[对话历史摘要]"),
-    );
-    const finalSystem =
-      systemPrompt +
-      (kbExtra
-        ? `\n\n## 前期对话摘要\n\n以下是你与用户之前对话的摘要，请注意参考：\n${kbExtra.content}`
-        : "");
-
-    result.push({ role: "system", content: finalSystem });
-
-    // 过滤掉压缩摘要消息（已注入 system prompt），加上用户消息
-    // role="tool" 的消息转为 user 角色注入，让模型在跨轮次后仍能看到原始工具执行结果
-    for (const m of prevMessages) {
-      if (m.content.startsWith("[对话历史摘要]")) continue;
-      if (m.role === "tool") {
-        result.push({
-          role: "user" as const,
-          content: `[工具执行结果 - ${m.toolCallId || "unknown"}]\n${m.toolCallError ? `执行错误：${m.toolCallError}` : m.content}`,
-        });
-      } else {
-        result.push({ role: m.role, content: m.content });
-      }
-    }
-    // 合并文件内容到用户消息
-    let finalContent = userMsg.content;
-    if (userMsg.files && userMsg.files.length > 0) {
-      const fileBlocks = userMsg.files.map((f) => `[文件: ${f.name}]\n${f.data}`);
-      finalContent = fileBlocks.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
-    }
-    result.push({ role: userMsg.role, content: finalContent });
-    return result;
-  }
-
-  const MAX_TOOL_ROUNDS = 5;
-
-  /** Chat 模式：流式调用 → 可选 tool call（仅低敏感模组，最多 1 轮） */
-  async function handleChatSend(
-    userMsg: Message,
-    prevMessages: Message[],
-    currentMode: Mode,
-    abortController: AbortController,
-    activeId: string,
-  ) {
-    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
-
-    // 先添加 user 消息（同步更新 messages 和 memoryMessages）
-    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
-
-    let allToolResults: { role: string; content: string }[] = [];
-    let complete = false;
-    let toolCallRound = 0;
-    const MAX_CHAT_TOOL_ROUNDS = 5;
-
-    while (!complete) {
-      const assistantId = String(nextMsgId++);
-      streamingMsgIdRef.current = assistantId;
-
-      const placeholder: Message = {
-        id: assistantId,
-        role: "assistant",
-        content: "",
-        timestamp: Date.now(),
-        streaming: true,
-      };
-
-      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, placeholder]));
-
-      let fullContent = "";
-      let fullReasoning = "";
-      let reasoningEnded = false;
-
-      const apiMessages = [...initialApiMessages, ...allToolResults];
-
-      try {
-        for await (const chunk of streamChatCompletion(
-          selectedModel!,
-          apiMessages,
-          abortController.signal,
-        )) {
-          fullContent += chunk.content;
-          fullReasoning += chunk.reasoningContent;
-          // 检测思考阶段结束：有 reasoning 积累后首次收到内容片段
-          if (!reasoningEnded && fullReasoning && chunk.content) {
-            reasoningEnded = true;
-          }
-          // 剥离 <tool_call> 标签展示到 UI，同时检测是否正在发起工具调用
-          const displayContent = stripToolCalls(fullContent);
-          const hasToolCall = fullContent.includes("<tool_call");
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-            msgs.map((msg) =>
-              msg.id === assistantId
-                ? { ...msg, content: displayContent, toolCallInProgress: hasToolCall, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) }
-                : msg,
-            ),
-          ));
-        }
-      } catch (streamErr) {
-        // 流式失败时，如果已有工具结果则视为完成，但不再吞掉错误
-        if (allToolResults.length > 0) {
-          const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
-          const displayContent = errMsg.startsWith("[API_ERROR:")
-            ? errMsg
-            : `**（上下文续传中断，工具结果已获取）**\n\n**实际错误:** ${errMsg}`;
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-            msgs.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: displayContent, streaming: false } : msg,
-            ),
-          ));
-          complete = true;
-          continue;
-        }
-        throw streamErr;
-      }
-
-      // 标记当前 assistant 消息完成
-      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-        msgs.map((msg) =>
-          msg.id === assistantId ? { ...msg, streaming: false } : msg,
-        ),
-      ));
-
-      // 解析 tool call
-      const toolCalls = parseToolCalls(fullContent);
-      if (toolCalls.length === 0) {
-        complete = true;
-        const cleanContent = stripToolCalls(fullContent);
-        if (cleanContent !== fullContent) {
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-            msgs.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: cleanContent, toolCallInProgress: false } : msg,
-            ),
-          ));
-        }
-      } else if (toolCallRound < MAX_CHAT_TOOL_ROUNDS) {
-        // 先清理可见消息中的 <tool_call> 内容，避免 JSON 泄漏到 UI
-        const cleanContent = stripToolCalls(fullContent);
-        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-          msgs.map((msg) =>
-            msg.id === assistantId
-              ? { ...msg, content: cleanContent !== fullContent ? cleanContent : msg.content, toolCallInProgress: true }
-              : msg,
-          ),
-        ));
-        toolCallRound++;
-
-        // ── 开发者模式：在 assistant 消息上记录调试信息 ──
-        if (developerMode) {
-          const debugEntries: import("./types").ToolDebugEntry[] = toolCalls.map((c) => ({
-            round: toolCallRound - 1,
-            rawToolCall: JSON.stringify({ id: c.id, params: c.params }, null, 2),
-          }));
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-            msgs.map((msg) =>
-              msg.id === assistantId ? { ...msg, toolDebugInfo: debugEntries } : msg,
-            ),
-          ));
-        }
-
-        // 执行所有 tool call（记录耗时以便开发者模式展示）
-        // 将 assistant 的 tool call 消息加入上下文，让模型知道这是它自己的调用结果
-        const MIN_TOOL_INTERVAL_MS = 500;
-        const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-        const toolResults: { result: import("./services/agentEngine").ToolResult; durationMs: number }[] = [];
-        allToolResults.push({ role: "assistant", content: fullContent });
-        // 工具开始执行，移除"正在发起工具调用"占位
-        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-          msgs.map((msg) =>
-            msg.id === assistantId ? { ...msg, toolCallInProgress: false } : msg,
-          ),
-        ));
-        for (const call of toolCalls) {
-          const startTime = performance.now();
-          const result = await executeToolCall(call, abortController.signal, selectedModel);
-          const durationMs = Math.round(performance.now() - startTime);
-          toolResults.push({ result, durationMs });
-
-          const toolMsg: Message = {
-            id: String(nextMsgId++),
-            role: "tool",
-            content: result.content,
-            toolCallId: call.id,
-            toolCallError: result.error,
-            timestamp: Date.now(),
-          };
-
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: [...c.messages, toolMsg],
-            updatedAt: Date.now(),
-          }));
-
-          allToolResults.push({
-            role: "user" as const,
-            content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
-          });
-
-          // 工具调用间加间隔，避免被服务端判定为爬虫
-          if (toolCalls.length > 1) {
-            await delay(MIN_TOOL_INTERVAL_MS);
-          }
-        }
-
-        // ── 开发者模式：更新 assistant 消息上的调试信息（填入执行结果） ──
-        if (developerMode && toolResults.length > 0) {
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-            msgs.map((msg) =>
-              msg.id === assistantId && msg.toolDebugInfo
-                ? {
-                    ...msg,
-                    toolDebugInfo: msg.toolDebugInfo.map((entry, i) => ({
-                      ...entry,
-                      result: toolResults[i]?.result.content,
-                      error: toolResults[i]?.result.error,
-                      durationMs: toolResults[i]?.durationMs,
-                    })),
-                  }
-                : msg,
-            ),
-          ));
-        }
-        // 工具执行完后短暂等待再发起续传，给后端时间释放资源
-        await new Promise((r) => setTimeout(r, 200));
-      } else {
-        // 超过最大工具调用轮数，不再执行，但清除 <tool_call> 标签
-        complete = true;
-        const cleanContent = stripToolCalls(fullContent);
-        if (cleanContent) {
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-            msgs.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: cleanContent } : msg,
-            ),
-          ));
-        }
-      }
-    }
-  }
-
-  /** Agent 模式：流式调用 → 解析 tool call → 执行 → 再调 LLM */
-  async function handleAgentSend(
-    userMsg: Message,
-    prevMessages: Message[],
-    currentMode: Mode,
-    abortController: AbortController,
-    activeId: string,
-  ) {
-    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
-
-    // 先添加 user 消息（占位符由每轮循环创建）
-    updateConv(activeId, (c) => ({
-      ...c,
-      messages: [...c.messages, userMsg],
-      updatedAt: Date.now(),
-    }));
-
-    let allToolResults: { role: string; content: string }[] = [];
-    let conversionComplete = false;
-    let toolRound = 0;
-
-    while (!conversionComplete && toolRound < MAX_TOOL_ROUNDS) {
-      const assistantId = String(nextMsgId++);
-      streamingMsgIdRef.current = assistantId;
-
-      const placeholder: Message = {
-        id: assistantId,
-        role: "assistant",
-        content: "",
-        timestamp: Date.now(),
-        streaming: true,
-      };
-
-      updateConv(activeId, (c) => ({
-        ...c,
-        messages: [...c.messages, placeholder],
-        updatedAt: Date.now(),
-      }));
-
-      let fullContent = "";
-      let fullReasoning = "";
-      let reasoningEnded = false;
-
-      const apiMessages = [...initialApiMessages, ...allToolResults];
-
-      try {
-        for await (const chunk of streamChatCompletion(
-          selectedModel!,
-          apiMessages,
-          abortController.signal,
-        )) {
-          fullContent += chunk.content;
-          fullReasoning += chunk.reasoningContent;
-          // 检测思考阶段结束：有 reasoning 积累后首次收到内容片段
-          if (!reasoningEnded && fullReasoning && chunk.content) {
-            reasoningEnded = true;
-          }
-          const displayContent = stripToolCalls(fullContent);
-          const hasToolCall = fullContent.includes("<tool_call");
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId
-                ? { ...msg, content: displayContent, toolCallInProgress: hasToolCall, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) }
-                : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
-        }
-      } catch (streamErr) {
-        // 流式失败时，如果已有工具结果则视为完成，但不再吞掉错误
-        if (allToolResults.length > 0) {
-          const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
-          const displayContent = errMsg.startsWith("[API_ERROR:")
-            ? errMsg
-            : `**（上下文续传中断，工具结果已获取）**\n\n**实际错误:** ${errMsg}`;
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: displayContent, streaming: false } : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
-          conversionComplete = true;
-          continue;
-        }
-        throw streamErr;
-      }
-
-      // 标记当前 assistant 消息完成
-      updateConv(activeId, (c) => ({
-        ...c,
-        messages: c.messages.map((msg) =>
-          msg.id === assistantId ? { ...msg, streaming: false } : msg,
-        ),
-        updatedAt: Date.now(),
-      }));
-
-      toolRound++;
-
-      // 解析 tool call
-      const toolCalls = parseToolCalls(fullContent);
-      if (toolCalls.length === 0) {
-        // 无 tool call → 完成，清除 tool call 标签
-        conversionComplete = true;
-        const cleanContent = stripToolCalls(fullContent);
-        if (cleanContent !== fullContent) {
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId ? { ...msg, content: cleanContent, toolCallInProgress: false } : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
-        }
-      } else {
-        // 先清理可见消息中的 <tool_call> 内容，避免 JSON 泄漏到 UI
-        const cleanContent = stripToolCalls(fullContent);
-        updateConv(activeId, (c) => ({
-          ...c,
-          messages: c.messages.map((msg) =>
-            msg.id === assistantId
-              ? { ...msg, content: cleanContent !== fullContent ? cleanContent : msg.content, toolCallInProgress: true }
-              : msg,
-          ),
-          updatedAt: Date.now(),
-        }));
-        // ── 开发者模式：在 assistant 消息上记录调试信息 ──
-        if (developerMode) {
-          const debugEntries: import("./types").ToolDebugEntry[] = toolCalls.map((c) => ({
-            round: toolRound - 1,
-            rawToolCall: JSON.stringify({ id: c.id, params: c.params }, null, 2),
-          }));
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId ? { ...msg, toolDebugInfo: debugEntries } : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
-        }
-
-        // 执行所有 tool call（记录耗时以便开发者模式展示）
-        // 将 assistant 的 tool call 消息加入上下文，让模型知道这是它自己的调用结果
-        const MIN_TOOL_INTERVAL_MS = 500;
-        const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-        const toolResults: { result: import("./services/agentEngine").ToolResult; durationMs: number }[] = [];
-        allToolResults.push({ role: "assistant", content: fullContent });
-        // 工具开始执行，移除"正在发起工具调用"占位
-        updateConv(activeId, (c) => ({
-          ...c,
-          messages: c.messages.map((msg) =>
-            msg.id === assistantId ? { ...msg, toolCallInProgress: false } : msg,
-          ),
-          updatedAt: Date.now(),
-        }));
-        for (const call of toolCalls) {
-          const startTime = performance.now();
-          const result = await executeToolCall(call, abortController.signal, selectedModel);
-          const durationMs = Math.round(performance.now() - startTime);
-          toolResults.push({ result, durationMs });
-
-          const toolMsg: Message = {
-            id: String(nextMsgId++),
-            role: "tool",
-            content: result.content,
-            toolCallId: call.id,
-            toolCallError: result.error,
-            timestamp: Date.now(),
-          };
-
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: [...c.messages, toolMsg],
-            updatedAt: Date.now(),
-          }));
-
-          allToolResults.push({
-            role: "user" as const,
-            content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
-          });
-
-          // 工具调用间加间隔，避免被服务端判定为爬虫
-          if (toolCalls.length > 1) {
-            await delay(MIN_TOOL_INTERVAL_MS);
-          }
-        }
-
-        // ── 开发者模式：更新 assistant 消息上的调试信息（填入执行结果） ──
-        if (developerMode && toolResults.length > 0) {
-          updateConv(activeId, (c) => ({
-            ...c,
-            messages: c.messages.map((msg) =>
-              msg.id === assistantId && msg.toolDebugInfo
-                ? {
-                    ...msg,
-                    toolDebugInfo: msg.toolDebugInfo.map((entry, i) => ({
-                      ...entry,
-                      result: toolResults[i]?.result.content,
-                      error: toolResults[i]?.result.error,
-                      durationMs: toolResults[i]?.durationMs,
-                    })),
-                  }
-                : msg,
-            ),
-            updatedAt: Date.now(),
-          }));
-        }
-        // 工具执行完后短暂等待再发起续传，给后端时间释放资源
-        await new Promise((r) => setTimeout(r, 200));
-      }
-    }
-  }
-
-  // ── 自动标题生成 ─────────────────────────────────
-  /** 使用模型根据对话内容生成一个简洁标题（仅在新会话首次对话后触发） */
-  async function generateConversationTitle(
-    model: ModelConfig,
-    userContent: string,
-    assistantContent: string,
-    convId: string,
-  ) {
-    const titlePrompt = [
-      '根据以下对话内容，用3-6个字生成本次对话的简洁标题（不要使用引号或多余文字，仅返回标题本身）：',
-      '',
-      '用户：' + userContent.slice(0, 500),
-      '助手：' + assistantContent.slice(0, 500),
-    ].join('\n');
-    const messages = [{ role: 'user' as const, content: titlePrompt }];
-    try {
-      let fullTitle = '';
-      for await (const chunk of streamChatCompletion(model, messages)) {
-        fullTitle += chunk.content;
-      }
-      const trimmed = fullTitle.replace(/[""""']/g, '').trim();
-      if (trimmed) {
-        updateConv(convId, (c) => ({
-          ...c,
-          title: trimmed.length > 30 ? trimmed.slice(0, 30) + '...' : trimmed,
-          autoTitleDone: true,
-          updatedAt: Date.now(),
-        }));
-      } else {
-        // 空结果时也标记已尝试过，避免重复触发
-        updateConv(convId, (c) => ({ ...c, autoTitleDone: true, updatedAt: Date.now() }));
-      }
-    } catch {
-      // 静默失败，不阻塞用户
-      updateConv(convId, (c) => ({ ...c, autoTitleDone: true, updatedAt: Date.now() }));
-    }
-    // 持久化到文件（setTimeout 0 等待 state 更新后再读 ref）
-    setTimeout(() => {
-      flushConversations(conversationsRef.current, sessionPathRef.current);
-    }, 0);
-  }
-
-  const handleSend = useCallback(
-    async (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
-      if (!activeId || !selectedModel) return;
-      const currentMode = sendMode ?? mode;
-
-      // Cancel any existing streaming
-      if (abortRef.current) {
-        abortRef.current.abort();
-      }
-
-      const userMsg: Message = {
-        id: String(nextMsgId++),
-        role: "user",
-        content: text,
-        timestamp: Date.now(),
-        files,
-      };
-
-      const currentConv = conversations.find((c) => c.id === activeId);
-      // 使用 memoryMessages（记忆量）作为模型输入消息；若无则回退到 literals
-      const prevMessages = currentConv?.memoryMessages ?? currentConv?.messages ?? [];
-
-      // 判断是否需要自动标题：全新会话（无消息）且未标记过
-      const needsAutoTitle = currentConv
-        && currentConv.messages.length === 0
-        && !currentConv.autoTitleDone;
-
-      setIsStreaming(true);
-      const abortController = new AbortController();
-      abortRef.current = abortController;
-
-      try {
-        if (currentMode === "Agent") {
-          await handleAgentSend(userMsg, prevMessages, currentMode, abortController, activeId);
-        } else {
-          await handleChatSend(userMsg, prevMessages, currentMode, abortController, activeId);
-        }
-      } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          const lastStreaming = streamingMsgIdRef.current;
-          if (lastStreaming) {
-            updateConv(activeId, (c) => ({
-              ...c,
-              messages: c.messages.map((msg) =>
-                msg.id === lastStreaming ? { ...msg, streaming: false } : msg,
-              ),
-              updatedAt: Date.now(),
-            }));
-          }
-        } else {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          const lastStreaming = streamingMsgIdRef.current;
-          if (lastStreaming) {
-            // 结构化 API 错误保持原样（MessageBubble 渲染为红色面板），其他错误依旧 Markdown 加粗
-            const displayContent = errorMsg.startsWith("[API_ERROR:")
-              ? errorMsg
-              : `**Error:** ${errorMsg}`;
-            updateConv(activeId, (c) => ({
-              ...c,
-              messages: c.messages.map((msg) =>
-                msg.id === lastStreaming
-                  ? { ...msg, content: displayContent, streaming: false }
-                  : msg,
-              ),
-              updatedAt: Date.now(),
-            }));
-          }
-        }
-      } finally {
-        const completedNormally = !abortController.signal.aborted;
-        setIsStreaming(false);
-        streamingMsgIdRef.current = null;
-        abortRef.current = null;
-        setTimeout(() => {
-          flushConversations(conversationsRef.current, sessionPathRef.current);
-        }, 0);
-
-        // 会话完成后发送系统通知（屏幕右下角）
-        if (completedNormally) {
-          playNotificationSound();
-          sendNotification({ title: "会话任务已完成。", body: "" });
-        }
-
-        // 流式完成后，如需自动标题则调用模型生成
-        if (needsAutoTitle && selectedModel) {
-          // 等待 React state 同步后获取最新对话中的 assistant 消息
-          setTimeout(() => {
-            const conv = conversationsRef.current.find((c) => c.id === activeId);
-            if (conv) {
-              const assistantMsgs = conv.messages.filter((m) => m.role === 'assistant');
-              const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
-              if (lastAssistant && lastAssistant.content) {
-                generateConversationTitle(selectedModel, text, lastAssistant.content, activeId);
-              }
-            }
-          }, 0);
-        }
-      }
+  /** 防抖落盘：同时保存元数据和当前活跃会话的消息体 */
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushConversations = useCallback(
+    (convs: Conversation[], path: string) => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = setTimeout(async () => {
+        flushTimerRef.current = null;
+        const activeConv = convs.find((c) => c.id === activeId) ?? null;
+        const metas = convs.map(toMeta);
+        await flushConversationData(activeConv, metas, "normal", path);
+        try {
+          localStorage.setItem("unicoda-conversations-meta", JSON.stringify(metas));
+        } catch { /* ignore */ }
+      }, 100);
     },
-    [activeId, selectedModel, conversations, updateConv, mode],
+    [activeId],
   );
 
-  const handleStop = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-    }
-  }, []);
+  // ── Chat stream hook ───────────────────────────────────────
+  const chatStream = useChatStream({
+    updateConv,
+    conversations,
+    conversationsRef,
+    setConversations,
+    selectedModel,
+    mode,
+    preferredLanguage,
+    developerMode,
+    panelMode,
+    workspacePath: undefined,
+    workMode: "normal",
+    sessionPath: sessionPathRef.current,
+    locale,
+    flushConvs: flushConversations,
+    withMsgUpdate,
+  });
+
+  const handleSendWrapper = useCallback(
+    (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
+      chatStream.handleSend(text, activeId, sendMode, files);
+    },
+    [chatStream.handleSend, activeId],
+  );
+
+  const handleCompressNowWrapper = useCallback(() => {
+    chatStream.handleCompressNow(activeId);
+  }, [chatStream.handleCompressNow, activeId]);
 
   // Clamp sidebar on window resize
   useEffect(() => {
@@ -1103,34 +486,6 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     }
     setPrintOpen(true);
   }, [activeConv, showToast]);
-
-  const handleToggleCompression = useCallback(() => {
-    setCompressionEnabled((v) => !v);
-  }, []);
-
-  const handleCompressNow = useCallback(async () => {
-    if (!activeConv || !selectedModel || isCompressing) return;
-    const targetMsgs = activeConv.memoryMessages ?? activeConv.messages;
-    if (targetMsgs.length < MIN_MESSAGES_FOR_COMPRESSION) return;
-    setIsCompressing(true);
-    try {
-      const result = await compressConversation(
-        targetMsgs,
-        selectedModel,
-      );
-      if (result.summary) {
-        updateConv(activeId!, (c) => ({
-          ...c,
-          memoryMessages: result.messages,
-          updatedAt: Date.now(),
-        }));
-      }
-    } catch {
-      // silent
-    } finally {
-      setIsCompressing(false);
-    }
-  }, [activeConv, activeId, selectedModel, updateConv, isCompressing]);
 
   // ── Ctrl+P Print Dialog (with context guards + toast) ──
   const printGuardRef = useRef({ isLocked: false, panelMode: "Default" as PanelMode, settingsOpen: false, componentsOpen: false, hasActiveConv: false });
@@ -1327,7 +682,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             >
               {/* Messages */}
               {activeConv ? (
-                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} isStreaming={isStreaming} />
+                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} isStreaming={chatStream.isStreaming} />
               ) : (
                 <div
                   style={{
@@ -1346,22 +701,23 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
               {/* Input */}
               {activeConv && (
                 <InputBar
-                  onSend={handleSend}
-                  onStop={handleStop}
-                  disabled={isStreaming}
+                  onSend={handleSendWrapper}
+                  onStop={chatStream.handleStop}
+                  disabled={chatStream.isStreaming}
                   messages={activeConv.messages}
                   memoryMessages={activeConv.memoryMessages ?? activeConv.messages}
                   maxTokens={selectedModel?.params?.maxTokens}
-                  compressionEnabled={compressionEnabled}
-                  onToggleCompression={handleToggleCompression}
-                  onCompressNow={handleCompressNow}
-                  isCompressing={isCompressing}
+                  compressionEnabled={chatStream.compressionEnabled}
+                  onToggleCompression={chatStream.handleToggleCompression}
+                  onCompressNow={handleCompressNowWrapper}
+                  isCompressing={chatStream.isCompressing}
                   mode={mode}
                   onModeChange={setMode}
-                  pendingFiles={pendingFiles}
-                  onRemovePendingFile={handleRemovePendingFile}
-                  onClearPendingFiles={() => setPendingFiles([])}
-                  dragOver={dragOver}
+                  preferredLanguage={preferredLanguage}
+                  pendingFiles={chatStream.pendingFiles}
+                  onRemovePendingFile={chatStream.handleRemovePendingFile}
+                  onClearPendingFiles={chatStream.clearPendingFiles}
+                  dragOver={chatStream.dragOver}
                 />
               )}
             </div>
@@ -1455,7 +811,123 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
       {/* ── Lock overlay (inside data-theme root so --c-bg resolves) ── */}
       <LockOverlay locale={locale} yolo={panelMode === "Yolo"} />
 
+      {/* ── 版本升级公告 ── */}
+      {showUpdateDialog && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 999998,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          backgroundColor: "rgba(0,0,0,0.5)",
+          backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)",
+        }} onClick={() => setShowUpdateDialog(false)}>
+          <div style={{
+            backgroundColor: "var(--c-bg2)", border: "1px solid var(--c-bd)",
+            borderRadius: "12px", padding: "28px 32px", maxWidth: "460px",
+            width: "90%", boxShadow: "0 12px 48px rgba(0,0,0,0.5)",
+            userSelect: "text",
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: "16px", fontWeight: 700, color: "var(--c-txt)", marginBottom: "12px", lineHeight: 1.6 }}>
+              🎉 Unicoda 已更新至 {APP_VERSION}
+            </div>
+            <div style={{ fontSize: "13px", color: "var(--c-t3)", lineHeight: 1.8, whiteSpace: "pre-wrap", marginBottom: "20px" }}>
+              {UPDATE_CHANGELOG}
+            </div>
+            <button onClick={() => setShowUpdateDialog(false)}
+              style={{
+                width: "100%", padding: "10px 0", borderRadius: "8px",
+                border: "1px solid var(--c-bd)", background: "var(--c-bg)",
+                color: "var(--c-txt)", fontSize: "13px", fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--c-t3)"; e.currentTarget.style.background = "var(--c-bg3)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--c-bd)"; e.currentTarget.style.background = "var(--c-bg)"; }}>
+              {t("close")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 版本降级警告 ── */}
+      {showDowngradeDialog && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 999998,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          backgroundColor: "rgba(0,0,0,0.5)",
+          backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)",
+        }} onClick={() => setShowDowngradeDialog(false)}>
+          <div style={{
+            backgroundColor: "var(--c-bg2)", border: "1px solid var(--c-bd)",
+            borderRadius: "12px", padding: "28px 32px", maxWidth: "420px",
+            width: "90%", boxShadow: "0 12px 48px rgba(0,0,0,0.5)",
+            userSelect: "text",
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: "16px", fontWeight: 700, color: "#e8a838", marginBottom: "12px", lineHeight: 1.6 }}>
+              ⚠️ 版本回退检测
+            </div>
+            <div style={{ fontSize: "13px", color: "var(--c-t3)", lineHeight: 1.8, marginBottom: "24px" }}>
+              您当前运行的 Unicoda 版本（{APP_VERSION}）低于上次安装的版本。这可能是因为您安装了旧版本。为确保最佳体验，建议升级到最新版本。
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button onClick={async () => {
+                setShowDowngradeDialog(false);
+                // 标记"不再提醒"
+                try {
+                  await writeConfigFile(VERSION_STORAGE_KEY, {
+                    version: APP_VERSION,
+                    downgradeDismissed: true,
+                  } satisfies VersionRecord);
+                } catch { /* ignore */ }
+              }}
+                style={{
+                  flex: 1, padding: "10px 0", borderRadius: "8px",
+                  border: "1px solid var(--c-bd)", background: "var(--c-bg)",
+                  color: "var(--c-txt)", fontSize: "13px", fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--c-t3)"; e.currentTarget.style.background = "var(--c-bg3)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--c-bd)"; e.currentTarget.style.background = "var(--c-bg)"; }}>
+                不再提醒
+              </button>
+              <button onClick={() => setShowDowngradeDialog(false)}
+                style={{
+                  flex: 1, padding: "10px 0", borderRadius: "8px",
+                  border: "1px solid var(--c-bd)", background: "var(--c-bg)",
+                  color: "var(--c-txt)", fontSize: "13px", fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--c-t3)"; e.currentTarget.style.background = "var(--c-bg3)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--c-bd)"; e.currentTarget.style.background = "var(--c-bg)"; }}>
+                {t("close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
+  );
+}
+
+// ── Alpha 版本标记（必须内嵌以访问 useTheme） ──
+function VersionBadge() {
+  const { t } = useTheme();
+  return (
+    <span
+      style={{
+        position: "fixed",
+        bottom: "10px",
+        right: "14px",
+        fontSize: "11px",
+        color: "#fff",
+        mixBlendMode: "difference",
+        pointerEvents: "none",
+        userSelect: "none",
+        whiteSpace: "nowrap",
+        fontFamily: "inherit",
+        zIndex: 99999,
+      }}
+    >
+      {t("alphaTestBadge")}
+    </span>
   );
 }
 
@@ -1467,25 +939,7 @@ export default function App() {
     <ModelProvider>
     <SearchProvider>
       <MainContent panelMode={panelMode} setPanelMode={setPanelMode} />
-
-      {/* ── 版本标记（全局顶层，取反色） ── */}
-      <span
-        style={{
-          position: "fixed",
-          bottom: "10px",
-          right: "14px",
-          fontSize: "11px",
-          color: "#fff",
-          mixBlendMode: "difference",
-          pointerEvents: "none",
-          userSelect: "none",
-          whiteSpace: "nowrap",
-          fontFamily: "inherit",
-          zIndex: 99999,
-        }}
-      >
-        [Alpha测试] 此版本不代表最终品质
-      </span>
+      <VersionBadge />
     </SearchProvider>
     </ModelProvider>
     </LockProvider>

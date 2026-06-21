@@ -11,7 +11,7 @@ import {
 import { readConfigFile, writeConfigFile } from "../utils/configStorage";
 import { sha256 } from "../utils/crypto";
 
-const LOCK_CONFIG_KEY = "unicoda-lock";
+const LOCK_CONFIG_KEY = "unison-lock";
 
 interface LockConfig {
   /** SHA-256 哈希后的密码，空字符串表示未设置 */
@@ -22,7 +22,7 @@ interface LockConfig {
   privacyEnabled: boolean;
   /** 闲置自动锁定时间（分钟），默认 5 */
   idleTimeout: number;
-  /** 启动时要求输入密码 */
+  /** 启动时是否要求输入密码 */
   startupLockEnabled: boolean;
 }
 
@@ -35,34 +35,42 @@ const DEFAULT_LOCK: LockConfig = {
 };
 
 interface LockContextType {
+  /** 隐私服务是否已启用 */
   privacyEnabled: boolean;
+  /** 切换隐私服务 */
   setPrivacyEnabled: (enabled: boolean) => Promise<void>;
+  /** 闲置自动锁定时间（分钟） */
   idleTimeout: number;
+  /** 设置闲置自动锁定时间 */
   setIdleTimeout: (minutes: number) => Promise<void>;
+  /** 是否已设置密码 */
   hasPassword: boolean;
+  /** 当前是否处于锁定状态 */
   isLocked: boolean;
+  /** 启动时是否要求输入密码 */
   startupLockEnabled: boolean;
+  /** 设置启动时是否要求输入密码 */
   setStartupLockEnabled: (enabled: boolean) => Promise<void>;
+  /** 锁定屏幕 */
   lock: () => Promise<void>;
+  /** 尝试解锁 */
   unlock: (password: string) => Promise<boolean>;
+  /** 设置初始密码（仅在无密码时可用） */
   setPassword: (password: string) => Promise<boolean>;
+  /** 修改密码（需要旧密码） */
   changePassword: (oldPassword: string, newPassword: string) => Promise<boolean>;
+  /** 清除密码（关闭锁定服务，需要旧密码） */
   clearPassword: (password: string) => Promise<boolean>;
 }
 
 const LockContext = createContext<LockContextType | null>(null);
 
 async function loadLockConfig(): Promise<LockConfig> {
-  const loaded = await readConfigFile<Partial<LockConfig>>(
-    LOCK_CONFIG_KEY,
-    DEFAULT_LOCK,
-  );
-  return { ...DEFAULT_LOCK, ...loaded };
+  return readConfigFile<LockConfig>(LOCK_CONFIG_KEY, DEFAULT_LOCK);
 }
 
-function saveLockConfig(config: LockConfig): void {
-  // fire-and-forget — don't block the event loop
-  writeConfigFile(LOCK_CONFIG_KEY, config);
+async function saveLockConfig(config: LockConfig): Promise<void> {
+  await writeConfigFile(LOCK_CONFIG_KEY, config);
 }
 
 export function LockProvider({ children }: { children: ReactNode }) {
@@ -70,47 +78,22 @@ export function LockProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ---- ref-based snapshot — always up-to-date for event handlers ----
-  const configRef = useRef(config);
-  configRef.current = config;
-
-  const resetIdleTimer = useCallback(() => {
-    if (idleTimerRef.current !== null) {
-      clearTimeout(idleTimerRef.current);
-      idleTimerRef.current = null;
-    }
-  }, []);
-
-  /** Just set isLocked via functional updater — never stale */
-  const performLock = useCallback(() => {
-    setConfig((prev) => {
-      if (!prev.privacyEnabled || prev.passwordHash.length === 0) {
-        return prev;
-      }
-      if (prev.isLocked) {
-        return prev;
-      }
-      const next = { ...prev, isLocked: true };
-      saveLockConfig(next);
-      return next;
-    });
-  }, []);
-
-  // 启动时异步加载锁定配置
+  // 启动时异步加载锁定配置，若隐私服务开启且有密码则自动锁定
   useEffect(() => {
     loadLockConfig().then((loadedConfig) => {
-      // 如果未启用启动锁，则忽略持久化的 isLocked 状态
-      if (!loadedConfig.startupLockEnabled) {
-        loadedConfig.isLocked = false;
-      }
       setConfig(loadedConfig);
       setLoaded(true);
     });
   }, []);
 
-  // 启动后：如果启用了"启动时需输入密码"且有密码 → 自动锁定
+  // 启动后：如果启动锁定、隐私服务开启且有密码 → 自动锁定
   useEffect(() => {
-    if (loaded && config.startupLockEnabled && config.privacyEnabled && config.passwordHash.length > 0) {
+    if (
+      loaded &&
+      config.startupLockEnabled &&
+      config.privacyEnabled &&
+      config.passwordHash.length > 0
+    ) {
       setConfig((prev) => {
         if (prev.isLocked) return prev;
         const next = { ...prev, isLocked: true };
@@ -121,60 +104,71 @@ export function LockProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
-  // ---- 🔐 Global hotkey Ctrl+F12 ----
-  // Uses refs so the handler never goes stale; effect deps are empty so
-  // the listener is registered ONCE and never churned.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === "F12") {
-        e.preventDefault();
-        const c = configRef.current;
-        if (c.privacyEnabled && c.passwordHash.length > 0 && !c.isLocked) {
-          performLock();
-        }
+  const hasPassword = config.passwordHash.length > 0;
+  const lockServiceActive = config.privacyEnabled && hasPassword;
+
+  const lock = useCallback(async () => {
+    if (!config.privacyEnabled) return;
+    if (config.passwordHash.length === 0) return;
+    const next = { ...config, isLocked: true };
+    setConfig(next);
+    await saveLockConfig(next);
+  }, [config]);
+
+  const unlock = useCallback(
+    async (password: string): Promise<boolean> => {
+      const hash = await sha256(password);
+      if (hash === config.passwordHash) {
+        const next = { ...config, isLocked: false };
+        setConfig(next);
+        await saveLockConfig(next);
+        // 解锁后重置闲置计时器
+        resetIdleTimer();
+        return true;
       }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      return false;
+    },
+    [config],
+  );
+
+  /** 重置闲置自动锁定计时器 */
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
   }, []);
 
-  // ---- 🕐 Idle auto-lock ----
-  // Rerun whenever the relevant config values change, but use ref-based
-  // startIdleTimer to avoid the closure-staleness problem.
+  /** 启动闲置计时 */
+  const startIdleTimer = useCallback(() => {
+    resetIdleTimer();
+    if (!config.privacyEnabled || config.passwordHash.length === 0) return;
+    if (config.isLocked) return;
+    idleTimerRef.current = setTimeout(() => {
+      setConfig((prev) => {
+        if (!prev.privacyEnabled || prev.passwordHash.length === 0) return prev;
+        if (prev.isLocked) return prev;
+        const next = { ...prev, isLocked: true };
+        saveLockConfig(next);
+        return next;
+      });
+    }, config.idleTimeout * 60 * 1000);
+  }, [config.privacyEnabled, config.passwordHash.length, config.isLocked, config.idleTimeout, resetIdleTimer]);
+
+  // 用户活动监听：重置闲置计时
   useEffect(() => {
-    const isActive = config.privacyEnabled && config.passwordHash.length > 0;
+    if (!config.privacyEnabled || config.passwordHash.length === 0) return;
 
-    const activityEvents = [
-      "mousedown",
-      "keydown",
-      "mousemove",
-      "touchstart",
-      "scroll",
-      "wheel",
-    ] as const;
-
-    const start = () => {
-      resetIdleTimer();
-      const c = configRef.current;
-      if (!c.privacyEnabled || c.passwordHash.length === 0) return;
-      if (c.isLocked) return;
-      let delayMs = c.idleTimeout * 60 * 1000;
-      if (!Number.isFinite(delayMs) || delayMs <= 0) delayMs = 5 * 60 * 1000; // fallback
-      idleTimerRef.current = setTimeout(() => {
-        performLock();
-      }, delayMs);
+    const activityEvents = ["mousedown", "keydown", "mousemove", "touchstart", "scroll", "wheel"];
+    const handler = () => {
+      startIdleTimer();
     };
 
-    const handler = () => start();
+    activityEvents.forEach((ev) => window.addEventListener(ev, handler, { passive: true }));
+    // 初次启动计时
+    startIdleTimer();
 
-    if (isActive && !config.isLocked) {
-      activityEvents.forEach((ev) =>
-        window.addEventListener(ev, handler, { passive: true }),
-      );
-      start();
-    }
-
+    // 如果已锁定，清除计时
     if (config.isLocked) {
       resetIdleTimer();
     }
@@ -183,31 +177,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
       activityEvents.forEach((ev) => window.removeEventListener(ev, handler));
       resetIdleTimer();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.privacyEnabled, config.passwordHash.length, config.isLocked, config.idleTimeout]);
-
-  // ---- Public API ----
-
-  const lock = useCallback(async () => {
-    performLock();
-  }, [performLock]);
-
-  const unlock = useCallback(
-    async (password: string): Promise<boolean> => {
-      const hash = await sha256(password);
-      const expected = configRef.current.passwordHash;
-      if (hash !== expected) return false;
-      resetIdleTimer();
-      setConfig((prev) => {
-        if (!prev.isLocked) return prev;
-        const next = { ...prev, isLocked: false };
-        saveLockConfig(next);
-        return next;
-      });
-      return true;
-    },
-    [resetIdleTimer],
-  );
+  }, [config.privacyEnabled, config.passwordHash.length, config.isLocked, startIdleTimer, resetIdleTimer]);
 
   const setPassword = useCallback(
     async (password: string): Promise<boolean> => {
@@ -215,7 +185,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
       const hash = await sha256(password);
       const next: LockConfig = { ...config, passwordHash: hash, isLocked: false };
       setConfig(next);
-      saveLockConfig(next);
+      await saveLockConfig(next);
       return true;
     },
     [config],
@@ -224,73 +194,74 @@ export function LockProvider({ children }: { children: ReactNode }) {
   const changePassword = useCallback(
     async (oldPassword: string, newPassword: string): Promise<boolean> => {
       const oldHash = await sha256(oldPassword);
-      if (oldHash !== configRef.current.passwordHash) return false;
+      if (oldHash !== config.passwordHash) return false;
       const newHash = await sha256(newPassword);
-      setConfig((prev) => {
-        const next = { ...prev, passwordHash: newHash };
-        saveLockConfig(next);
-        return next;
-      });
+      const next: LockConfig = { ...config, passwordHash: newHash };
+      setConfig(next);
+      await saveLockConfig(next);
       return true;
     },
-    [],
+    [config],
   );
 
   const clearPassword = useCallback(
     async (password: string): Promise<boolean> => {
       const hash = await sha256(password);
-      if (hash !== configRef.current.passwordHash) return false;
-      setConfig((prev) => {
-        const next = { ...prev, passwordHash: "", isLocked: false };
-        saveLockConfig(next);
-        return next;
-      });
+      if (hash !== config.passwordHash) return false;
+      const next: LockConfig = { ...config, passwordHash: "", isLocked: false };
+      setConfig(next);
+      await saveLockConfig(next);
       return true;
     },
-    [],
+    [config.passwordHash, config.privacyEnabled, config.idleTimeout],
   );
 
   const setPrivacyEnabled = useCallback(
     async (enabled: boolean) => {
-      setConfig((prev) => {
-        const next = { ...prev, privacyEnabled: enabled };
-        if (!enabled) {
-          next.isLocked = false;
-          resetIdleTimer();
-        }
-        saveLockConfig(next);
-        return next;
-      });
+      const next = { ...config, privacyEnabled: enabled };
+      // 关闭隐私服务时强制解锁
+      if (!enabled) {
+        next.isLocked = false;
+        resetIdleTimer();
+      }
+      setConfig(next);
+      await saveLockConfig(next);
     },
-    [resetIdleTimer],
+    [config, resetIdleTimer],
   );
 
   const setIdleTimeout = useCallback(
     async (minutes: number) => {
       const clamped = Math.max(1, Math.min(60, minutes));
-      setConfig((prev) => {
-        if (prev.idleTimeout === clamped) return prev;
-        const next = { ...prev, idleTimeout: clamped };
-        saveLockConfig(next);
-        return next;
-      });
+      const next = { ...config, idleTimeout: clamped };
+      setConfig(next);
+      await saveLockConfig(next);
     },
-    [],
+    [config],
   );
 
   const setStartupLockEnabled = useCallback(
     async (enabled: boolean) => {
-      setConfig((prev) => {
-        if (prev.startupLockEnabled === enabled) return prev;
-        const next = { ...prev, startupLockEnabled: enabled };
-        saveLockConfig(next);
-        return next;
-      });
+      const next = { ...config, startupLockEnabled: enabled };
+      setConfig(next);
+      await saveLockConfig(next);
     },
-    [],
+    [config],
   );
 
-  const hasPassword = config.passwordHash.length > 0;
+  // 全局快捷键 Ctrl+F12（仅在隐私服务开启且有密码时生效）
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "F12") {
+        e.preventDefault();
+        if (config.privacyEnabled && hasPassword && !config.isLocked) {
+          lock();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [config.privacyEnabled, config.isLocked, hasPassword, lock]);
 
   const value = useMemo<LockContextType>(
     () => ({
@@ -308,21 +279,9 @@ export function LockProvider({ children }: { children: ReactNode }) {
       changePassword,
       clearPassword,
     }),
-    [
-      config.privacyEnabled,
-      config.idleTimeout,
-      config.isLocked,
-      config.startupLockEnabled,
-      hasPassword,
-      lock,
-      unlock,
-      setPassword,
-      changePassword,
-      clearPassword,
-      setPrivacyEnabled,
-      setIdleTimeout,
-      setStartupLockEnabled,
-    ],
+    [config.privacyEnabled, config.idleTimeout, config.isLocked, config.startupLockEnabled,
+     hasPassword, lock, unlock, setPassword, changePassword, clearPassword,
+     setPrivacyEnabled, setIdleTimeout, setStartupLockEnabled],
   );
 
   return <LockContext.Provider value={value}>{children}</LockContext.Provider>;

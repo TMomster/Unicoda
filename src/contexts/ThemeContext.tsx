@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
-import type { Locale } from "../i18n";
+import type { Locale, PreferredLanguage } from "../i18n";
 import { t } from "../i18n";
 import { writeConfigFile } from "../utils/configStorage";
 
@@ -16,6 +16,8 @@ interface ThemeContextType {
   selectedFontName: string;
   fontOptions: FontOption[];
   locale: Locale;
+  preferredLanguage: PreferredLanguage;
+  internetSearchEnabled: boolean;
   t: (key: string) => string;
   sessionPath: string;
   userName: string;
@@ -27,6 +29,8 @@ interface ThemeContextType {
   setScale: (s: number) => void;
   setSelectedFont: (fontName: string) => void;
   setLocale: (locale: Locale) => void;
+  setPreferredLanguage: (lang: PreferredLanguage) => void;
+  setInternetSearchEnabled: (v: boolean) => void;
   setSessionPath: (path: string) => void;
   setUserName: (name: string) => void;
   setUserAvatar: (dataUrl: string) => void;
@@ -64,10 +68,10 @@ function buildFontFamily(primary: string): string {
 // 缩放基准：70% 作为 100% 标准
 const BASELINE_SCALE = 0.70;
 
-interface SavedSettings { scale: number; fontName: string; locale: Locale; sessionPath: string; userName: string; userAvatar: string; defaultMarkdown: boolean; defaultReasoningOpen: boolean; developerMode: boolean; theme: ThemeMode; }
+interface SavedSettings { scale: number; fontName: string; locale: Locale; preferredLanguage: PreferredLanguage; internetSearchEnabled: boolean; sessionPath: string; userName: string; userAvatar: string; defaultMarkdown: boolean; defaultReasoningOpen: boolean; developerMode: boolean; theme: ThemeMode; }
 
 /** 外观/行为默认值（resetSettings 会回到这些值，不含隐私和模型配置） */
-const DEFAULT_SETTINGS: SavedSettings = { scale: 100, fontName: FONT_OPTIONS[0].name, locale: "en-US" as Locale, sessionPath: "", userName: "用户", userAvatar: "", defaultMarkdown: true, defaultReasoningOpen: true, developerMode: false, theme: "dark" };
+const DEFAULT_SETTINGS: SavedSettings = { scale: 100, fontName: FONT_OPTIONS[0].name, locale: "en-US" as Locale, preferredLanguage: "zh-CN" as PreferredLanguage, internetSearchEnabled: true, sessionPath: "", userName: "用户", userAvatar: "", defaultMarkdown: true, defaultReasoningOpen: true, developerMode: false, theme: "dark" };
 
 function loadSettingsSync(): SavedSettings {
   try {
@@ -83,6 +87,8 @@ function loadSettingsSync(): SavedSettings {
         scale: scale ?? 100,
         fontName: s.fontName || FONT_OPTIONS[0].name,
         locale: s.locale ?? "en-US",
+        preferredLanguage: (s.preferredLanguage as PreferredLanguage) ?? "zh-CN",
+        internetSearchEnabled: s.internetSearchEnabled ?? true,
         sessionPath: s.sessionPath ?? "",
         userName: s.userName ?? "用户",
         userAvatar: s.userAvatar ?? "",
@@ -127,6 +133,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const setLocale = useCallback((locale: Locale) => {
     setSettings((prev) => {
       const next = { ...prev, locale };
+      writeConfigFile(STORAGE_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const setPreferredLanguage = useCallback((preferredLanguage: PreferredLanguage) => {
+    setSettings((prev) => {
+      const next = { ...prev, preferredLanguage };
       writeConfigFile(STORAGE_KEY, next);
       return next;
     });
@@ -180,6 +194,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setInternetSearchEnabled = useCallback((v: boolean) => {
+    setSettings((prev) => {
+      const next = { ...prev, internetSearchEnabled: v };
+      writeConfigFile(STORAGE_KEY, next);
+      return next;
+    });
+  }, []);
+
   const setTheme = useCallback((v: ThemeMode) => {
     const root = document.documentElement;
     // Add transition class immediately so browser registers it
@@ -228,6 +250,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       selectedFontName: settings.fontName,
       fontOptions: FONT_OPTIONS,
       locale: settings.locale,
+      preferredLanguage: settings.preferredLanguage,
+      internetSearchEnabled: settings.internetSearchEnabled,
       t: translate,
       sessionPath: settings.sessionPath,
       userName: settings.userName,
@@ -239,6 +263,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setScale,
       setSelectedFont,
       setLocale,
+      setPreferredLanguage,
+      setInternetSearchEnabled,
       setSessionPath,
       setUserName,
       setUserAvatar,
@@ -248,7 +274,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setTheme,
       resetSettings,
     }),
-    [settings, fontFamily, translate, setScale, setSelectedFont, setLocale, setSessionPath, setUserName, setUserAvatar, setDefaultMarkdown, setDefaultReasoningOpen, setDeveloperMode, setTheme, resetSettings],
+    [settings, fontFamily, translate, setScale, setSelectedFont, setLocale, setPreferredLanguage, setInternetSearchEnabled, setSessionPath, setUserName, setUserAvatar, setDefaultMarkdown, setDefaultReasoningOpen, setDeveloperMode, setTheme, resetSettings],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

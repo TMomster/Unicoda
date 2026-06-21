@@ -62,7 +62,7 @@ function WelcomeScreen() {
           lineHeight: 1.6,
         }}
       >
-        {t("whatToDo")}
+        {t("startNewChat")}
       </p>
 
       {/* Feature hints */}

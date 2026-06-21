@@ -45,6 +45,12 @@ export interface Message {
   files?: FileAttachment[];
   /** 正在发起工具调用中（仅 assistant 消息，content 中已剥离 <tool_call> 标签） */
   toolCallInProgress?: boolean;
+  /** 任务计划执行的步骤数量（仅 task_plan 执行后的 assistant 消息） */
+  toolCallResultCount?: number;
+  /** 是否为任务计划卡片消息（独立 UI 卡片展示） */
+  isTaskPlan?: boolean;
+  /** 任务计划数据 */
+  taskPlan?: { intent: string; feasibility: string; steps: { id: string; tool: string; description: string }[] };
 }
 
 export interface Conversation {

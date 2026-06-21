@@ -232,7 +232,7 @@ const mod: Module = {
             yield "错误：search_replace 操作需要提供 replace 参数（替换后的文本）。";
             return;
           }
-          const count = parseInt(params.count, 10) || -1;
+          const count = params.count === undefined ? -1 : parseInt(params.count, 10);
           const useRegex = params.regex === "true" || params.regex === true;
           const fullText = existing;
 
@@ -268,7 +268,16 @@ const mod: Module = {
           ) || []).length;
           const replacedCount = originalCount - afterCount;
 
-          yield `找到 ${originalCount} 处匹配，已替换 ${replacedCount} 处。\n`;
+          if (originalCount === 0) {
+            yield `错误：search_replace 未找到 "${search}" 的任何匹配，文件未修改。请检查 search 内容是否正确。\n`;
+            return;
+          }
+          if (replacedCount === 0) {
+            yield `警告：找到 ${originalCount} 处匹配，但替换后内容与原文相同，文件未变更。\n`;
+            // 不 return，继续写回（无实际变更也无害）
+          } else {
+            yield `找到 ${originalCount} 处匹配，已替换 ${replacedCount} 处。\n`;
+          }
           break;
         }
 

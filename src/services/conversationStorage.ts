@@ -58,7 +58,6 @@ export async function loadMetadata(
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<ConversationMeta[]> {
-  if (!sessionPath) return [];
   const key = `${subPath(mode)}/${METADATA_FILE}`;
   return readConfigFile<ConversationMeta[]>(key, [], sessionPath);
 }
@@ -68,7 +67,6 @@ export async function saveMetadata(
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<void> {
-  if (!sessionPath) return;
   const key = `${subPath(mode)}/${METADATA_FILE}`;
   await writeConfigFile(key, metas, sessionPath);
 }
@@ -80,7 +78,6 @@ export async function loadLiteralMessages(
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<Message[] | null> {
-  if (!sessionPath) return null;
   const key = literalPath(convId, mode);
   try {
     return await readConfigFile<Message[]>(key, null as unknown as Message[], sessionPath);
@@ -95,7 +92,6 @@ export async function saveLiteralMessages(
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<void> {
-  if (!sessionPath) return;
   const key = literalPath(convId, mode);
   await writeConfigFile(key, messages, sessionPath);
 }
@@ -107,7 +103,6 @@ export async function loadMemoryMessages(
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<Message[] | null> {
-  if (!sessionPath) return null;
   const key = memoryPath(convId, mode);
   try {
     return await readConfigFile<Message[]>(key, null as unknown as Message[], sessionPath);
@@ -122,7 +117,6 @@ export async function saveMemoryMessages(
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<void> {
-  if (!sessionPath) return;
   const key = memoryPath(convId, mode);
   await writeConfigFile(key, messages, sessionPath);
 }
@@ -153,20 +147,19 @@ export async function deleteConversationFiles(
 // ── 会话数据完整落盘（元数据 + 字面量 + 记忆量） ─────────────
 
 export async function flushConversationData(
-  convs: Conversation[],
+  activeConv: Conversation | null,
+  metas: ConversationMeta[],
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<void> {
-  if (!sessionPath) return;
-  // 1. 写全部会话的元数据
-  const metas = convs.map(toMeta);
+  // 1. 写元数据
   await saveMetadata(metas, mode, sessionPath);
-  // 2. 写全部会话的消息文件（每个会话独立文件）
-  for (const conv of convs) {
-    await saveLiteralMessages(conv.id, conv.messages, mode, sessionPath);
+  // 2. 写当前活跃会话的消息文件
+  if (activeConv) {
+    await saveLiteralMessages(activeConv.id, activeConv.messages, mode, sessionPath);
     await saveMemoryMessages(
-      conv.id,
-      conv.memoryMessages ?? conv.messages,
+      activeConv.id,
+      activeConv.memoryMessages ?? activeConv.messages,
       mode,
       sessionPath,
     );

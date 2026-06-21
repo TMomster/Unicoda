@@ -1,5 +1,46 @@
-export type Locale = "zh-CN" | "en-US";
+// ── 可扩展的国际化系统 ─────────────────────────────────
+// 添加新语言只需:
+//   1. 在 SUPPORTED_LOCALES 中添加条目
+//   2. 创建对应的翻译字典
+//   3. 调用 registerLocale() 注册
 
+export interface LocaleInfo {
+  value: string;
+  label: string;
+}
+
+export const SUPPORTED_LOCALES: LocaleInfo[] = [
+  { value: "zh-CN", label: "汉语(中文, 中国)" },
+  { value: "en-US", label: "英语(English, United States)" },
+  { value: "de-DE", label: "德语(Deutsch, Deutschland)" },
+];
+
+export const PREFERRED_LOCALES: LocaleInfo[] = [
+  { value: "zh-CN", label: "汉语(中文, 中国)" },
+  { value: "en-US", label: "英语(English, United States)" },
+  { value: "de-DE", label: "德语(Deutsch, Deutschland)" },
+  { value: "fr-FR", label: "法语(Français, 法国)" },
+  { value: "es-ES", label: "西班牙语(Español, 西班牙)" },
+  { value: "en-GB", label: "英语(English, United Kingdom)" },
+  { value: "en-AU", label: "英语(English, Australia)" },
+  { value: "en-IN", label: "英语(English, India)" },
+  { value: "ja-JP", label: "日语(日本語, 日本)" },
+];
+
+export type Locale = (typeof SUPPORTED_LOCALES)[number]["value"];
+export type PreferredLanguage = (typeof PREFERRED_LOCALES)[number]["value"];
+
+const translations: Record<string, Record<string, string>> = {};
+
+export function registerLocale(locale: string, dict: Record<string, string>) {
+  translations[locale] = dict;
+}
+
+export function t(locale: string, key: string): string {
+  return translations[locale]?.[key] ?? key;
+}
+
+// ── 中文 ──
 const zh: Record<string, string> = {
   // Sidebar
   newConversation: "新建会话",
@@ -19,10 +60,32 @@ const zh: Record<string, string> = {
   scale: "缩放比例",
   uiFont: "界面字体",
   uiLanguage: "界面语言",
+  uiLanguageDesc: "Unicoda 界面显示的语言",
+  preferredLanguage: "偏好语言",
+  preferredLanguageDesc: "您要求模型回复的语言",
+  prefLangZh: "汉语",
+  prefLangEn: "English (US)",
+  prefLangDe: "Deutsch",
+  prefLangJa: "日本語",
+  prefLangFr: "Français",
+  prefLangEs: "Español",
+  prefLangEnGB: "English (UK)",
+  prefLangEnAU: "English (Australia)",
+  prefLangEnIN: "English (India)",
+  langZh: "中文",
+  langEn: "英语（美国）",
+  langDe: "德语",
+  langJa: "日语",
+  langFr: "法语",
+  langEs: "西班牙语",
+  langEnGB: "英语（英国）",
+  langEnAU: "英语（澳大利亚）",
+  langEnIN: "英语（印度）",
   chinese: "中文",
   english: "English",
   // ChatPanel Welcome
   yourRequestOurCode: "Your request, our code.",
+  startNewChat: "今天我们要做什么？",
   whatToDo: "选择或新建一个会话",
   fileReadWrite: "文件读写",
   commandExec: "命令执行",
@@ -38,11 +101,8 @@ const zh: Record<string, string> = {
   contextPin: "置顶",
   contextUnpin: "取消置顶",
   contextDelete: "删除",
-  // Session Sidebar
-  sessions: "会话",
-  newSession: "新会话",
   // InputBar
-  inputPlaceholder: "向 Unicoda 发起会话",
+  inputPlaceholder: "向 Unison 发起会话",
   aiDisclaimer: "人工智能技术生成内容仅供参考",
   modeNotSupported: " (暂不支持)",
   // Model Config
@@ -58,15 +118,15 @@ const zh: Record<string, string> = {
   delete: "删除",
   // Disclaimer
   disclaimerTitle: "免责声明",
-  disclaimerFee: "连接模型服务商的 API 将产生费用，具体费率标准由各服务商官方制定，与 Unicoda 无关。",
+  disclaimerFee: "连接模型服务商的 API 将产生费用，具体费率标准由各服务商官方制定，与 Unison 无关。",
   disclaimerSecurity: "用户在使用联网功能过程中，因遭遇网络攻击、数据泄露等造成的损失，由用户自行承担。",
-  disclaimerLegal: "用户不得利用 Unicoda 进行黑客攻击、开发病毒程序、侵犯他人合法权益等违法违规行为。",
-  disclaimerNeutral: "Unicoda 作为技术框架，具有技术中立性。",
+  disclaimerLegal: "用户不得利用 Unison 进行黑客攻击、开发病毒程序、侵犯他人合法权益等违法违规行为。",
+  disclaimerNeutral: "Unison 作为技术框架，具有技术中立性。",
   // Privacy Service
   privacyService: "隐私服务",
   privacyDesc: "开启后可使用锁定服务，保护桌面隐私不被他人直接看到。锁定服务仅遮盖工作区，正在进行的任务不会被取消。",
   privacyWarningTitle: "安全提示",
-  privacyWarning: "Unicoda 的锁定服务仅用于防止您的隐私直接暴露在桌面上被任何人看到。该服务不具备真正的安全性——密码以哈希形式存储在本地配置文件中，任何拥有您设备访问权限的人均可绕过。请勿依赖本功能保护敏感或机密信息。",
+  privacyWarning: "Unison 的锁定服务仅用于防止您的隐私直接暴露在桌面上被任何人看到。该服务不具备真正的安全性——密码以哈希形式存储在本地配置文件中，任何拥有您设备访问权限的人均可绕过。请勿依赖本功能保护敏感或机密信息。",
   privacyEnable: "启用隐私服务",
   privacyDisabled: "隐私服务未开启",
   privacyEnabled: "隐私服务已开启",
@@ -90,7 +150,7 @@ const zh: Record<string, string> = {
   lockDisabled: "锁定服务未开启",
   lockShortcutHint: "快捷键：Ctrl + F12",
   lockStartupLock: "启动时需输入密码",
-  lockStartupLockDesc: "开启后，每次启动 Unicoda 将要求输入密码才能进入主界面。",
+  lockStartupLockDesc: "开启后，每次启动 Unison 将要求输入密码才能进入主界面。",
   lockIdleTimeout: "闲置自动锁定",
   lockIdleTimeoutLabel: "闲置超过",
   lockIdleTimeoutUnit: "分钟后自动锁定",
@@ -130,17 +190,12 @@ const zh: Record<string, string> = {
   // Display
   defaultMarkdown: "默认 Markdown 渲染",
   defaultReasoningOpen: "默认展开深度思考栏",
-  resetSettings: "重置配置",
-  resetSettingsConfirm: "确认重置所有外观和行为配置（隐私和模型配置不受影响）？",
-  resetSettingsDone: "配置已重置",
   markdownBtnTitle: "切换 Markdown 渲染",
   markdownBtnOn: "Markdown",
   markdownBtnOff: "Markdown",
   // Reasoning
   reasoningInProgress: "深度思考中",
   reasoning: "深度思考",
-  // Tool Call
-  toolCallInProgress: "正在发起工具调用...",
   // Avatar
   userAvatar: "用户头像",
   removeAvatar: "移除头像",
@@ -165,8 +220,8 @@ const zh: Record<string, string> = {
   componentsTabModules: "模组",
   componentsTabKnowledge: "知识库",
   noModules: "暂无可用模组",
-  moduleLevel_normal: "普通",
-  moduleLevel_sensitive: "敏感",
+  moduleLevel_low: "低敏感",
+  moduleLevel_high: "高敏感",
   moduleAvailableIn: "可用模式",
   // Knowledge Base
   knowledgeBase: "知识库",
@@ -177,26 +232,12 @@ const zh: Record<string, string> = {
   knowledgeCardTitle: "标题",
   knowledgeCardContent: "内容",
   knowledgeCardTitlePlaceholder: "输入知识卡标题",
-  knowledgeCardSummary: "描述",
-  knowledgeCardSummaryPlaceholder: "输入描述（可选，留空则取内容前 50 字）",
   knowledgeCardContentPlaceholder: "输入知识卡内容",
   editCard: "编辑",
   deleteCard: "删除",
   save: "保存",
   builtinCard: "内置",
-  builtinCardSection: "内置知识卡",
-  userCardSection: "用户知识卡",
-  searchKnowledge: "搜索知识卡…",
-  collapseSection: "收起",
-  expandSection: "展开",
   confirmDeleteKb: "确认删除此知识卡？",
-  kbModeLabel: "知识库层级",
-  kbMode_framework: "框架级（所有模式可见）",
-  kbMode_normal: "普通模式专用",
-  kbMode_yolo: "Yolo 模式专用",
-  kbModeSection_framework: "框架级",
-  kbModeSection_normal: "普通模式级",
-  kbModeSection_yolo: "Yolo 模式级",
   cardSaved: "知识卡已保存",
   cardDeleted: "知识卡已删除",
   // Compression
@@ -237,7 +278,7 @@ const zh: Record<string, string> = {
   deselectAll: "取消全选",
   showReasoning: "显示思考过程",
   showModelInfo: "模型信息",
-  showUnisonInfo: "Unicoda 信息",
+  showUnisonInfo: "Unison 信息",
   showLicense: "许可证声明",
   showAnchors: "生成锚点目录",
   modelInfo: "模型",
@@ -262,6 +303,40 @@ const zh: Record<string, string> = {
   themeDark: "黑色",
   themeLight: "白色",
   themeDisabledInYolo: "Yolo 模式下不可用",
+  // SearXNG
+  searxngTitle: "SearXNG 搜索服务",
+  searxngDesc: "使用自建 SearXNG 实例进行联网搜索。\nSearXNG 需配置有效的实例地址，您可以通过 Docker Desktop 快速启动：\n  docker run -d --name searxng -p 8888:8080 searxng/searxng\n或使用 WSL2 内的 Docker：\n  wsl docker run -d --name searxng -p 8888:8080 searxng/searxng",
+  searxngEnable: "启用 SearXNG",
+  searxngInstanceUrl: "实例地址",
+  searxngInstanceUrlHint: "输入你的 SearXNG 实例地址，如 http://127.0.0.1:8888",
+  searxngCategories: "搜索分类",
+  searxngCategoriesHint: "逗号分隔，可选：general, news, images, videos, files, music, social, it",
+  searxngSearchLanguage: "搜索语言",
+  searxngAllLanguages: "all（不限）",
+  searxngSafeSearch: "安全搜索",
+  searxngSafeSearch0: "0 - 关闭",
+  searxngSafeSearch1: "1 - 中等",
+  searxngSafeSearch2: "2 - 严格",
+  searxngTestConnection: "测试连接",
+  searxngTesting: "测试中...",
+  searxngEnterUrl: "请先输入 SearXNG 实例地址",
+  searxngConnectSuccess: "连接成功！",
+  searxngConnectFail: "连接失败",
+  // Internet Search Permission
+  internetSearchTitle: "联网搜索权限",
+  internetSearchDesc: "关闭后，所有联网搜索功能（包括 Bing 搜索和 SearXNG）将被禁用。模型调用 web_search 模组时将返回拒绝提示。",
+  internetSearchEnabled: "允许联网搜索",
+  internetSearchDisabled: "联网搜索已关闭",
+  internetSearchBlocked: "⚠️ 联网搜索已关闭\n\n用户在 Unicoda 设置中关闭了「联网搜索权限」，因此无法调用 web_search 模组执行网络搜索。\n\n你可以向用户解释以下情况，并根据用户意愿选择处理方式：\n\n1. **如果用户希望继续搜索**：可以建议用户在设置面板中开启「联网搜索权限」开关\n2. **如果用户不愿开启搜索**：可以询问用户是否愿意让模型根据自身已知的知识来回答这个问题\n\n请注意：你无法主动帮用户开启该权限，需要用户在界面中手动操作。",
+  // Collapsible SearXNG
+  searxngExpand: "展开 SearXNG 设置",
+  // Reset Confirmation
+  resetSettings: "重置配置",
+  resetSettingsConfirm: "确认重置所有外观和行为配置（隐私和模型配置不受影响）？",
+  resetSettingsDone: "配置已重置",
+  resetSettingsTopHint: "重置所有外观和行为设置为默认值。隐私（密码、锁定）和模型配置不受影响。",
+  // Alpha Badge
+  alphaTestBadge: "[Alpha 测试] 此版本不代表最终品质",
 };
 
 const en: Record<string, string> = {
@@ -280,10 +355,30 @@ const en: Record<string, string> = {
   scale: "Scale",
   uiFont: "UI Font",
   uiLanguage: "UI Language",
+  preferredLanguage: "Preferred Language (AI response)",
+  prefLangZh: "汉语",
+  prefLangEn: "English (US)",
+  prefLangDe: "Deutsch",
+  prefLangJa: "日本語",
+  prefLangFr: "Français",
+  prefLangEs: "Español",
+  prefLangEnGB: "English (UK)",
+  prefLangEnAU: "English (Australia)",
+  prefLangEnIN: "English (India)",
+  langZh: "Chinese",
+  langEn: "English (US)",
+  langDe: "German",
+  langJa: "Japanese",
+  langFr: "French",
+  langEs: "Spanish",
+  langEnGB: "English (UK)",
+  langEnAU: "English (Australia)",
+  langEnIN: "English (India)",
   chinese: "中文",
   english: "English",
   yourRequestOurCode: "Your request, our code.",
-  whatToDo: "What shall we do today?",
+  startNewChat: "What shall we do today?",
+  whatToDo: "Select or start a new session",
   fileReadWrite: "File Read/Write",
   commandExec: "Command Execution",
   codeGen: "Code Generation",
@@ -296,10 +391,7 @@ const en: Record<string, string> = {
   contextPin: "Pin",
   contextUnpin: "Unpin",
   contextDelete: "Delete",
-  // Session Sidebar
-  sessions: "Sessions",
-  newSession: "New Session",
-  inputPlaceholder: "Start a session with Unicoda",
+  inputPlaceholder: "Start a session with Unison",
   aiDisclaimer: "AI-generated content is for reference only",
   modeNotSupported: " (Coming soon)",
   modelService: "Model Service",
@@ -313,15 +405,15 @@ const en: Record<string, string> = {
   advParams: "Advanced Parameters",
   delete: "Delete",
   disclaimerTitle: "Disclaimer",
-  disclaimerFee: "Connecting to model provider APIs will incur costs. Fee rates are determined solely by the respective providers and are unrelated to Unicoda.",
+  disclaimerFee: "Connecting to model provider APIs will incur costs. Fee rates are determined solely by the respective providers and are unrelated to Unison.",
   disclaimerSecurity: "Users bear full responsibility for any losses resulting from network attacks, data breaches, or other security incidents during use.",
-  disclaimerLegal: "Users must not use Unicoda for hacking, developing malicious software, violating others' legal rights, or any other illegal activities.",
-  disclaimerNeutral: "As a technical framework, Unicoda maintains technological neutrality.",
+  disclaimerLegal: "Users must not use Unison for hacking, developing malicious software, violating others' legal rights, or any other illegal activities.",
+  disclaimerNeutral: "As a technical framework, Unison maintains technological neutrality.",
   // Privacy Service
   privacyService: "Privacy Service",
   privacyDesc: "When enabled, you can use the lock service to protect your desktop privacy from casual onlookers. The lock only covers the workspace; ongoing tasks will not be interrupted.",
   privacyWarningTitle: "Security Notice",
-  privacyWarning: "Unicoda's lock service is designed solely to prevent your privacy from being directly exposed on the desktop. It does NOT provide real security—the password hash is stored locally, and anyone with physical access to your device can bypass it. Do NOT rely on this feature to protect sensitive or confidential information.",
+  privacyWarning: "Unison's lock service is designed solely to prevent your privacy from being directly exposed on the desktop. It does NOT provide real security—the password hash is stored locally, and anyone with physical access to your device can bypass it. Do NOT rely on this feature to protect sensitive or confidential information.",
   privacyEnable: "Enable Privacy Service",
   privacyDisabled: "Privacy service is disabled",
   privacyEnabled: "Privacy service is enabled",
@@ -345,7 +437,7 @@ const en: Record<string, string> = {
   lockDisabled: "Lock service is not enabled",
   lockShortcutHint: "Shortcut: Ctrl + F12",
   lockStartupLock: "Require password on startup",
-  lockStartupLockDesc: "When enabled, Unicoda will require a password to enter the main interface on every startup.",
+  lockStartupLockDesc: "When enabled, Unison will require a password to enter the main interface on every startup.",
   lockIdleTimeout: "Auto-lock on idle",
   lockIdleTimeoutLabel: "Lock after",
   lockIdleTimeoutUnit: "minutes of inactivity",
@@ -385,17 +477,12 @@ const en: Record<string, string> = {
   // Display
   defaultMarkdown: "Default Markdown Rendering",
   defaultReasoningOpen: "Default Expand Reasoning",
-  resetSettings: "Reset Settings",
-  resetSettingsConfirm: "Reset all appearance and behavior settings (privacy and model config unaffected)?",
-  resetSettingsDone: "Settings reset",
   markdownBtnTitle: "Toggle Markdown",
   markdownBtnOn: "Markdown",
   markdownBtnOff: "Markdown",
   // Reasoning
   reasoningInProgress: "Deep Thinking",
   reasoning: "Deep Thinking",
-  // Tool Call
-  toolCallInProgress: "Initiating tool call...",
   // Avatar
   userAvatar: "Avatar",
   removeAvatar: "Remove Avatar",
@@ -420,8 +507,8 @@ const en: Record<string, string> = {
   componentsTabModules: "Modules",
   componentsTabKnowledge: "Knowledge Base",
   noModules: "No modules available",
-  moduleLevel_normal: "Normal",
-  moduleLevel_sensitive: "Sensitive",
+  moduleLevel_low: "Low",
+  moduleLevel_high: "High",
   moduleAvailableIn: "Available in",
   // Knowledge Base
   knowledgeBase: "Knowledge Base",
@@ -432,26 +519,12 @@ const en: Record<string, string> = {
   knowledgeCardTitle: "Title",
   knowledgeCardContent: "Content",
   knowledgeCardTitlePlaceholder: "Enter card title",
-  knowledgeCardSummary: "Summary",
-  knowledgeCardSummaryPlaceholder: "Enter summary (optional, falls back to first 50 chars of content)",
   knowledgeCardContentPlaceholder: "Enter card content",
   editCard: "Edit",
   deleteCard: "Delete",
   save: "Save",
   builtinCard: "Built-in",
-  builtinCardSection: "Built-in Cards",
-  userCardSection: "User Cards",
-  searchKnowledge: "Search knowledge cards…",
-  collapseSection: "Collapse",
-  expandSection: "Expand",
   confirmDeleteKb: "Delete this knowledge card?",
-  kbModeLabel: "Knowledge Scope",
-  kbMode_framework: "Framework (all modes)",
-  kbMode_normal: "Normal mode only",
-  kbMode_yolo: "Yolo mode only",
-  kbModeSection_framework: "Framework",
-  kbModeSection_normal: "Normal Mode",
-  kbModeSection_yolo: "Yolo Mode",
   cardSaved: "Card saved",
   cardDeleted: "Card deleted",
   // Compression
@@ -492,7 +565,7 @@ const en: Record<string, string> = {
   deselectAll: "Deselect All",
   showReasoning: "Show Reasoning",
   showModelInfo: "Model Info",
-  showUnisonInfo: "Unicoda Info",
+  showUnisonInfo: "Unison Info",
   showLicense: "License",
   showAnchors: "Generate TOC",
   modelInfo: "Model",
@@ -517,10 +590,368 @@ const en: Record<string, string> = {
   themeDark: "Dark",
   themeLight: "Light",
   themeDisabledInYolo: "Not available in Yolo mode",
+  // SearXNG
+  searxngTitle: "SearXNG Search Service",
+  searxngDesc: "Use a self-hosted SearXNG instance for web search.\nSearXNG requires a valid instance URL. You can quickly start one via Docker Desktop:\n  docker run -d --name searxng -p 8888:8080 searxng/searxng\nOr using Docker in WSL2:\n  wsl docker run -d --name searxng -p 8888:8080 searxng/searxng",
+  searxngEnable: "Enable SearXNG",
+  searxngInstanceUrl: "Instance URL",
+  searxngInstanceUrlHint: "Enter your SearXNG instance URL, e.g. http://127.0.0.1:8888",
+  searxngCategories: "Search Categories",
+  searxngCategoriesHint: "Comma-separated. Options: general, news, images, videos, files, music, social, it",
+  searxngSearchLanguage: "Search Language",
+  searxngAllLanguages: "All (unlimited)",
+  searxngSafeSearch: "Safe Search",
+  searxngSafeSearch0: "0 - Off",
+  searxngSafeSearch1: "1 - Moderate",
+  searxngSafeSearch2: "2 - Strict",
+  searxngTestConnection: "Test Connection",
+  searxngTesting: "Testing...",
+  searxngEnterUrl: "Please enter the SearXNG instance URL first",
+  searxngConnectSuccess: "Connection successful!",
+  searxngConnectFail: "Connection failed",
+  // Internet Search Permission
+  internetSearchTitle: "Internet Search Permission",
+  internetSearchDesc: "When disabled, all web search capabilities (including Bing and SearXNG) will be blocked. The web_search module will return a rejection message when invoked by the model.",
+  internetSearchEnabled: "Allow Internet Search",
+  internetSearchDisabled: "Internet search is disabled",
+  internetSearchBlocked: "⚠️ Internet Search is Disabled\n\nThe user has turned off the \"Internet Search Permission\" in Unicoda settings, so the web_search module cannot be executed.\n\nYou can explain the situation to the user and ask how they'd like to proceed:\n\n1. **If the user wants to search**: Suggest enabling \"Internet Search Permission\" in the Settings panel\n2. **If the user does not want to enable search**: Ask if they'd like you to answer based on your existing knowledge\n\nNote: You cannot enable this permission for the user — they need to toggle it manually in the interface.",
+  // Collapsible SearXNG
+  searxngExpand: "Expand SearXNG Settings",
+  // Reset Confirmation
+  resetSettings: "Reset Settings",
+  resetSettingsConfirm: "Reset all appearance and behavior settings (privacy and model config unaffected)?",
+  resetSettingsDone: "Settings reset",
+  resetSettingsTopHint: "Reset all appearance and behavior settings to their defaults. Privacy (password, lock) and model configurations are not affected.",
+  // Alpha Badge
+  alphaTestBadge: "[Alpha test] This version does not represent final quality",
 };
 
-const ALL: Record<Locale, Record<string, string>> = { "zh-CN": zh, "en-US": en };
+// ── 德语 ──
+const de: Record<string, string> = {
+  newConversation: "Neue Sitzung",
+  searchConversations: "Sitzungen durchsuchen...",
+  noMatchConversations: "Keine passenden Sitzungen",
+  noConversations: "Keine Sitzungen",
+  settings: "Einstellungen",
+  collapseSidebar: "Seitenleiste einklappen",
+  expandSidebar: "Seitenleiste ausklappen",
+  sidebarSettings: "Einstellungen",
+  newChat: "+ Neue Sitzung",
+  selectOrCreate: "Wählen oder erstellen Sie eine Sitzung",
+  settingsTitle: "Einstellungen",
+  back: "Zurück",
+  scale: "Skalierung",
+  uiFont: "Schriftart",
+  uiLanguage: "Oberflächensprache",
+  uiLanguageDesc: "Sprache der Unicoda-Oberfläche",
+  preferredLanguage: "Bevorzugte Sprache",
+  preferredLanguageDesc: "Sprache, in der das Modell antworten soll",
+  prefLangZh: "汉语",
+  prefLangEn: "English (US)",
+  prefLangDe: "Deutsch",
+  prefLangJa: "日本語",
+  prefLangFr: "Français",
+  prefLangEs: "Español",
+  prefLangEnGB: "English (UK)",
+  prefLangEnAU: "English (Australia)",
+  prefLangEnIN: "English (India)",
+  langZh: "Chinesisch",
+  langEn: "Englisch (US)",
+  langDe: "Deutsch",
+  langJa: "Japanisch",
+  langFr: "Französisch",
+  langEs: "Spanisch",
+  langEnGB: "Englisch (Vereinigtes Königreich)",
+  langEnAU: "Englisch (Australien)",
+  langEnIN: "Englisch (Indien)",
+  chinese: "中文",
+  english: "English",
+  yourRequestOurCode: "Your request, our code.",
+  startNewChat: "Was sollen wir heute tun?",
+  whatToDo: "Wählen oder starten Sie eine neue Sitzung",
+  fileReadWrite: "Datei-Lesen/Schreiben",
+  commandExec: "Befehlsausführung",
+  codeGen: "Code-Generierung",
+  projectAnalysis: "Projektanalyse",
+  minimize: "Minimieren",
+  maximize: "Maximieren",
+  restore: "Wiederherstellen",
+  close: "Schließen",
+  contextRename: "Umbenennen",
+  contextPin: "Anheften",
+  contextUnpin: "Loslösen",
+  contextDelete: "Löschen",
+  inputPlaceholder: "Starten Sie eine Sitzung mit Unison",
+  aiDisclaimer: "KI-generierte Inhalte dienen nur als Referenz",
+  modeNotSupported: " (Bald verfügbar)",
+  modelService: "Modell-Dienst",
+  addModel: "Modell hinzufügen",
+  noModels: "Keine Modelle konfiguriert",
+  basicSettings: "Grundeinstellungen",
+  modelName: "Name",
+  provider: "Anbieter",
+  custom: "Benutzerdefiniert",
+  baseUrl: "Basis-URL",
+  advParams: "Erweiterte Parameter",
+  delete: "Löschen",
+  disclaimerTitle: "Haftungsausschluss",
+  disclaimerFee: "Die Verbindung zu den APIs der Modellanbieter verursacht Kosten. Die Gebühren werden ausschließlich von den jeweiligen Anbietern festgelegt und stehen in keinem Zusammenhang mit Unison.",
+  disclaimerSecurity: "Der Benutzer trägt die volle Verantwortung für Verluste durch Netzangriffe, Datenlecks oder andere Sicherheitsvorfälle während der Nutzung.",
+  disclaimerLegal: "Der Benutzer darf Unison nicht für Hacking, die Entwicklung von Schadsoftware, die Verletzung der Rechte Dritter oder andere illegale Aktivitäten nutzen.",
+  disclaimerNeutral: "Als technisches Framework wahrt Unison technologische Neutralität.",
+  // Privacy Service
+  privacyService: "Datenschutzdienst",
+  privacyDesc: "Wenn aktiviert, können Sie den Sperrdienst nutzen, um Ihre Desktop-Privatsphäre vor neugierigen Blicken zu schützen. Die Sperre deckt nur den Arbeitsbereich ab; laufende Aufgaben werden nicht unterbrochen.",
+  privacyWarningTitle: "Sicherheitshinweis",
+  privacyWarning: "Der Sperrdienst von Unison dient ausschließlich dem Schutz Ihrer Privatsphäre auf dem Desktop. Er bietet KEINE echte Sicherheit – der Passwort-Hash wird lokal gespeichert, und jeder mit physischem Zugriff auf Ihr Gerät kann ihn umgehen. Verlassen Sie sich NICHT auf diese Funktion zum Schutz sensibler oder vertraulicher Informationen.",
+  privacyEnable: "Datenschutzdienst aktivieren",
+  privacyDisabled: "Datenschutzdienst ist deaktiviert",
+  privacyEnabled: "Datenschutzdienst ist aktiviert",
+  privacyUnavailable: "Bitte legen Sie zuerst ein Passwort fest, um die Sperrfunktion zu nutzen",
+  // Lock
+  lockService: "Sperrdienst",
+  lockDesc: "Legen Sie ein Passwort fest, um den Bildschirm mit Strg+F12 zu sperren. Der aktuelle Arbeitsbereich wird abgedeckt, laufende Arbeiten werden nicht unterbrochen.",
+  lockSetPassword: "Passwort festlegen",
+  lockChangePassword: "Passwort ändern",
+  lockCurrentPassword: "Aktuelles Passwort",
+  lockNewPassword: "Neues Passwort",
+  lockConfirmPassword: "Passwort bestätigen",
+  lockPasswordMismatch: "Passwörter stimmen nicht überein",
+  lockPasswordEmpty: "Passwort darf nicht leer sein",
+  lockSetSuccess: "Passwort erfolgreich festgelegt. Der Sperrdienst ist jetzt aktiviert.",
+  lockChangeSuccess: "Passwort erfolgreich geändert",
+  lockWrongPassword: "Aktuelles Passwort ist falsch",
+  lockClearSuccess: "Sperrdienst wurde deaktiviert",
+  lockWarning: "Merken Sie sich Ihr Passwort! Wenn Sie es vergessen, gibt es keine Wiederherstellungsmethode. Sie müssen die Konfigurationsdatei manuell löschen, um zurückzusetzen.",
+  lockEnabled: "Sperrdienst ist aktiviert",
+  lockDisabled: "Sperrdienst ist nicht aktiviert",
+  lockShortcutHint: "Tastenkombination: Strg + F12",
+  lockStartupLock: "Passwort beim Start erforderlich",
+  lockStartupLockDesc: "Wenn aktiviert, verlangt Unison beim Start ein Passwort, um die Hauptoberfläche zu betreten.",
+  lockIdleTimeout: "Automatische Sperre bei Inaktivität",
+  lockIdleTimeoutLabel: "Sperren nach",
+  lockIdleTimeoutUnit: "Minuten Inaktivität",
+  lockIdleTimeout1: "1 Minute",
+  lockIdleTimeout3: "3 Minuten",
+  lockIdleTimeout5: "5 Minuten",
+  lockIdleTimeout10: "10 Minuten",
+  lockIdleTimeout15: "15 Minuten",
+  lockIdleTimeout30: "30 Minuten",
+  // Model Config — 新参数
+  frequencyPenalty: "Frequency Penalty",
+  presencePenalty: "Presence Penalty",
+  systemPrompt: "System-Prompt",
+  customProvider: "Benutzerdefiniert",
+  presetProvider: "Voreinstellung",
+  rangeReset: "Zurücksetzen",
+  // Chat / API
+  stopGeneration: "Generierung stoppen",
+  thinking: "Denkt nach",
+  generating: "Generiere Antwort...",
+  modelNotSelected: "Bitte wählen Sie zuerst ein Modell aus",
+  apiKeyMissing: "Bitte konfigurieren Sie einen API-Schlüssel für das aktuelle Modell",
+  recommendConfig: "Empfohlene Konfiguration",
+  // Session Storage
+  sessionStorage: "Sitzungsspeicher",
+  sessionPath: "Sitzungsspeicher-Pfad",
+  sessionPathPlaceholder: "Leer lassen für Standardpfad",
+  selectSessionFolder: "Sitzungsordner auswählen",
+  browse: "Durchsuchen",
+  currentSessionPath: "Aktueller Pfad",
+  sessionPathNotSet: "Nicht konfiguriert",
+  sessionPathUnavailable: "Nicht verfügbar",
+  // User
+  clickToEdit: "Klicken zum Bearbeiten",
+  userName: "Benutzername",
+  userNamePlaceholder: "Geben Sie Ihren Namen ein",
+  // Display
+  defaultMarkdown: "Standard-Markdown-Rendering",
+  defaultReasoningOpen: "Standardmäßig Reasoning erweitern",
+  markdownBtnTitle: "Markdown umschalten",
+  markdownBtnOn: "Markdown",
+  markdownBtnOff: "Markdown",
+  // Reasoning
+  reasoningInProgress: "Tiefes Denken",
+  reasoning: "Tiefes Denken",
+  // Avatar
+  userAvatar: "Avatar",
+  removeAvatar: "Avatar entfernen",
+  // Batch Management
+  batchSelect: "Mehrfachauswahl",
+  batchCancel: "Auswahl abbrechen",
+  batchSelectAll: "Alle auswählen",
+  batchDeselectAll: "Alle abwählen",
+  batchDelete: "Mehrere löschen",
+  batchDeleteConfirm: "{0} ausgewählte Sitzungen löschen? Dieser Vorgang kann nicht rückgängig gemacht werden.",
+  batchPin: "Mehrere anheften",
+  batchUnpin: "Mehrere loslösen",
+  batchSelected: "{0} ausgewählt",
+  // Delete Confirm
+  deleteConfirmTitle: "Löschen bestätigen",
+  deleteConfirmMessage: "Sind Sie sicher, dass Sie diese Sitzung löschen möchten? Dieser Vorgang kann nicht rückgängig gemacht werden.",
+  deleteConfirm: "Löschen",
+  cancel: "Abbrechen",
+  // Components
+  components: "Komponenten",
+  componentsTitle: "Komponenten-Manager",
+  componentsTabModules: "Module",
+  componentsTabKnowledge: "Wissensdatenbank",
+  noModules: "Keine Module verfügbar",
+  moduleLevel_low: "Niedrig",
+  moduleLevel_high: "Hoch",
+  moduleAvailableIn: "Verfügbar in",
+  // Knowledge Base
+  knowledgeBase: "Wissensdatenbank",
+  knowledgeBaseDesc: "Vorab ausgefüllte Wissenseinträge werden im Agent-Modus in den System-Prompt eingefügt, damit das Modell die Plattformfähigkeiten und den Kontext besser versteht.",
+  kbEntryEnabled: "Aktiviert",
+  kbEntryDisabled: "Deaktiviert",
+  addKnowledgeCard: "Wissenskarte hinzufügen",
+  knowledgeCardTitle: "Titel",
+  knowledgeCardContent: "Inhalt",
+  knowledgeCardTitlePlaceholder: "Kartentitel eingeben",
+  knowledgeCardContentPlaceholder: "Karteninhalt eingeben",
+  editCard: "Bearbeiten",
+  deleteCard: "Löschen",
+  save: "Speichern",
+  builtinCard: "Integriert",
+  confirmDeleteKb: "Diese Wissenskarte löschen?",
+  cardSaved: "Karte gespeichert",
+  cardDeleted: "Karte gelöscht",
+  // Compression
+  compressionEnabled: "Komprimieren",
+  compressionHint: "Frühe Konversation in Zusammenfassung komprimieren, letzte Runden intakt lassen",
+  compressNow: "Alte komprimieren",
+  compressing: "Komprimiere...",
+  compressed: "Komprimiert",
+  // Developer Mode
+  developerMode: "Entwicklermodus",
+  developerModeDesc: "Wenn aktiviert, zeigt ein Debug-Bereich die rohen Modulaufrufparameter, Ausführungsergebnisse und Zeitmessungen in der Sitzung zur Fehlerbehebung an.",
+  developerModeToggle: "Entwicklermodus aktivieren",
+  developerModeWarning: "Nur zum Debuggen. Kann die Nachrichtenmenge erhöhen.",
+  // Cookie Management
+  cookieManagement: "Cookie-Verwaltung",
+  cookieManagementDesc: "Das Websuchmodul verwendet Cookies, um die Bing-Suchsitzung und -Einstellungen zu erhalten. Gespeicherte Cookies bleiben über App-Neustarts hinweg erhalten.",
+  cookieCount: "{0} Cookies gespeichert für: {1}",
+  cookieNoData: "Keine Cookies gespeichert",
+  cookieClear: "Cookies löschen",
+  cookieClearConfirm: "Alle gespeicherten Such-Cookies löschen? Bei der nächsten Suche wird eine neue Sitzung erstellt.",
+  cookieCleared: "Cookies gelöscht",
+  cookieUpdated: "Zuletzt aktualisiert",
+  // Yolo Panel
+  yoloWelcome: "We talk, We code.",
+  yoloPanel: "Yolo-Bereich",
+  yoloWorkspace: "Arbeitsbereich",
+  yoloNoWorkspace: "Kein Arbeitsbereich",
+  yoloSelectFolder: "Arbeitsbereichs-Ordner auswählen",
+  yoloWorkspaceDesc: "Das Arbeitsbereichsverzeichnis für die Speicherung von Projektdateien im Yolo-Modus.",
+  yoloMode: "Yolo",
+  // Print Dialog
+  print: "Drucken",
+  printTitle: "Drucken - Gesprächsverlauf",
+  selected: "ausgewählt",
+  noMessages: "Keine Nachrichten",
+  printInfo: "Nachrichten zum Drucken auswählen",
+  selectAll: "Alle auswählen",
+  deselectAll: "Alle abwählen",
+  showReasoning: "Reasoning anzeigen",
+  showModelInfo: "Modellinfo",
+  showUnisonInfo: "Unison-Info",
+  showLicense: "Lizenz",
+  showAnchors: "Inhaltsverzeichnis generieren",
+  modelInfo: "Modell",
+  unisonVersion: "Version",
+  licenseNote: "Dieser Datensatz wird unter der Apache 2.0-Lizenz nur für den persönlichen Gebrauch veröffentlicht.",
+  tocTitle: "Inhaltsverzeichnis",
+  // File Upload
+  allowFileUpload: "Datei-Upload erlauben",
+  dragDropHint: "Ziehen Sie Dateien hierher oder klicken Sie zum Hochladen",
+  fileCandidate: "Dateikandidat",
+  removeFile: "Entfernen",
+  filePreview: "Dateivorschau",
+  fileTooLarge: "Datei zu groß",
+  fileTypeNotSupported: "Dateityp nicht unterstützt",
+  // Settings — User Section
+  userSection: "Benutzer",
+  userSectionDesc: "Benutzername & Avatar",
+  // Settings — Interface Section
+  interfaceSection: "Oberfläche",
+  interfaceSectionDesc: "Sprache, Schriftart, Skalierung & Design",
+  theme: "Design",
+  themeDark: "Dunkel",
+  themeLight: "Hell",
+  themeDisabledInYolo: "Im Yolo-Modus nicht verfügbar",
+  // SearXNG
+  searxngTitle: "SearXNG Suchdienst",
+  searxngDesc: "Verwenden Sie eine eigene SearXNG-Instanz für Websuche.\nSearXNG benötigt eine gültige Instanz-URL. Sie können eine Instanz schnell über Docker Desktop starten:\n  docker run -d --name searxng -p 8888:8080 searxng/searxng\nOder mit Docker in WSL2:\n  wsl docker run -d --name searxng -p 8888:8080 searxng/searxng",
+  searxngEnable: "SearXNG aktivieren",
+  searxngInstanceUrl: "Instanz-URL",
+  searxngInstanceUrlHint: "Geben Sie Ihre SearXNG-Instanz-URL ein, z.B. http://127.0.0.1:8888",
+  searxngCategories: "Suchkategorien",
+  searxngCategoriesHint: "Kommagetrennt. Optionen: general, news, images, videos, files, music, social, it",
+  searxngSearchLanguage: "Suchsprache",
+  searxngAllLanguages: "Alle (uneingeschränkt)",
+  searxngSafeSearch: "Sichere Suche",
+  searxngSafeSearch0: "0 - Aus",
+  searxngSafeSearch1: "1 - Mittel",
+  searxngSafeSearch2: "2 - Streng",
+  searxngTestConnection: "Verbindung testen",
+  searxngTesting: "Teste...",
+  searxngEnterUrl: "Bitte geben Sie zuerst die SearXNG-Instanz-URL ein",
+  searxngConnectSuccess: "Verbindung erfolgreich!",
+  searxngConnectFail: "Verbindung fehlgeschlagen",
+  // Internet Search Permission
+  internetSearchTitle: "Internetsuchberechtigung",
+  internetSearchDesc: "Wenn deaktiviert, werden alle Websuchfunktionen (einschließlich Bing und SearXNG) blockiert. Das web_search-Modul gibt bei Aufruf durch das Modell eine Ablehnungsmeldung zurück.",
+  internetSearchEnabled: "Internetsuche erlauben",
+  internetSearchDisabled: "Internetsuche ist deaktiviert",
+  internetSearchBlocked: "⚠️ Internetsuche ist deaktiviert\n\nDer Benutzer hat die \"Internetsuchberechtigung\" in den Unicoda-Einstellungen deaktiviert, daher kann das web_search-Modul nicht ausgeführt werden.\n\nSie können dem Benutzer die Situation erklären und fragen, wie er fortfahren möchte:\n\n1. **Wenn der Benutzer suchen möchte**: Schlagen Sie vor, die \"Internetsuchberechtigung\" im Einstellungsbereich zu aktivieren\n2. **Wenn der Benutzer die Suche nicht aktivieren möchte**: Fragen Sie, ob er möchte, dass Sie auf der Grundlage Ihres vorhandenen Wissens antworten\n\nHinweis: Sie können diese Berechtigung nicht für den Benutzer aktivieren - er muss sie manuell in der Benutzeroberfläche umschalten.",
+  // Collapsible SearXNG
+  searxngExpand: "SearXNG-Einstellungen erweitern",
+  // Reset Confirmation
+  resetSettings: "Einstellungen zurücksetzen",
+  resetSettingsConfirm: "Alle Darstellungs- und Verhaltenseinstellungen zurücksetzen (Datenschutz und Modellkonfiguration bleiben erhalten)?",
+  resetSettingsDone: "Einstellungen zurückgesetzt",
+  resetSettingsTopHint: "Setzt alle Darstellungs- und Verhaltenseinstellungen auf die Standardwerte zurück. Datenschutz (Passwort, Sperre) und Modellkonfigurationen bleiben erhalten.",
+  // Alpha Badge
+  alphaTestBadge: "[Alpha-Test] Diese Version stellt nicht die endgültige Qualität dar",
+};
 
-export function t(locale: Locale, key: string): string {
-  return ALL[locale]?.[key] ?? key;
-}
+// ── 日语（最小字典，仅需在偏好语言中使用的键） ──
+const jaMinimal: Record<string, string> = {
+  inputPlaceholder: "Unison にセッションを開始",
+};
+
+// ── 法语（最小字典） ──
+const frMinimal: Record<string, string> = {
+  inputPlaceholder: "Démarrer une session avec Unison",
+};
+
+// ── 西班牙语（最小字典） ──
+const esMinimal: Record<string, string> = {
+  inputPlaceholder: "Iniciar una sesión con Unison",
+};
+
+// ── 英语（英国）（最小字典） ──
+const enGBMinimal: Record<string, string> = {
+  inputPlaceholder: "Start a session with Unison",
+};
+
+// ── 英语（澳大利亚）（最小字典） ──
+const enAUMinimal: Record<string, string> = {
+  inputPlaceholder: "Start a session with Unison",
+};
+
+// ── 英语（印度）（最小字典） ──
+const enINMinimal: Record<string, string> = {
+  inputPlaceholder: "Start a session with Unison",
+};
+
+registerLocale("zh-CN", zh);
+registerLocale("en-US", en);
+registerLocale("de-DE", de);
+registerLocale("ja-JP", jaMinimal);
+registerLocale("fr-FR", frMinimal);
+registerLocale("es-ES", esMinimal);
+registerLocale("en-GB", enGBMinimal);
+registerLocale("en-AU", enAUMinimal);
+registerLocale("en-IN", enINMinimal);

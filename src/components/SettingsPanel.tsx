@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import AnimatedSection from "./AnimatedSection";
 import AuroraBackground from "./AuroraBackground";
 import type { ModelParams } from "../types";
+import { SUPPORTED_LOCALES, PREFERRED_LOCALES, PreferredLanguage } from "../i18n";
 
 interface Props { onBack: () => void; yolo?: boolean; }
 
@@ -93,13 +94,14 @@ function SE({ title, desc, children, yolo }: { title: string; desc?: string; chi
 }
 
 export default function SettingsPanel({ onBack, yolo }: Props) {
-  const { scale, setScale, selectedFontName, setSelectedFont, fontOptions, t, locale, setLocale, sessionPath, setSessionPath, userName, setUserName, userAvatar, setUserAvatar, defaultMarkdown, setDefaultMarkdown, defaultReasoningOpen, setDefaultReasoningOpen, developerMode, setDeveloperMode, theme, setTheme, resetSettings } = useTheme();
+  const { scale, setScale, selectedFontName, setSelectedFont, fontOptions, t, locale, setLocale, preferredLanguage, setPreferredLanguage, internetSearchEnabled, setInternetSearchEnabled, sessionPath, setSessionPath, userName, setUserName, userAvatar, setUserAvatar, defaultMarkdown, setDefaultMarkdown, defaultReasoningOpen, setDefaultReasoningOpen, developerMode, setDeveloperMode, theme, setTheme, resetSettings } = useTheme();
   const { models, selectedModelId, setSelectedModelId, addModel, updateModel, removeModel } = useModels();
   const { hasPassword, privacyEnabled, setPrivacyEnabled, idleTimeout, setIdleTimeout, startupLockEnabled, setStartupLockEnabled, setPassword, changePassword, clearPassword } = useLock();
   const { config: searxng, updateConfig: updateSearxng } = useSearch();
   const pct = scale;
   const [eid, se] = useState<string | null>(null);
-  const [pExp, spE] = useState(false); const [mExp, smE] = useState(false);
+  const [pExp, spE] = useState(false); const [mExp, smE] = useState(false); const [sxExp, setSxExp] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
   // const [pcm, spcm] = useState<Record<string, boolean>>({});
   const [lp, slp] = useState(""); const [lc, slc] = useState(""); const [lm, slm] = useState<{ t: "ok" | "err"; text: string } | null>(null);
   const [cm, scm] = useState(false); const [cop, scop] = useState(""); const [cnp, scnp] = useState(""); const [ccp, sccp] = useState("");
@@ -197,6 +199,37 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
           backgroundColor: "rgba(10,10,18,0.15)",
         } : {}),
       }}>
+        {/* ── 重置配置（顶部） ── */}
+        <SE yolo={y} title={t("resetSettings")} desc={t("resetSettingsTopHint")}>
+          <button onClick={() => setResetConfirm(true)}
+            style={{ width: "100%", padding: "12px 0", borderRadius: "8px", border: "1px solid rgba(239,68,68,0.3)", background: "transparent", color: "#f87171", fontSize: "14px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.06)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.background = "transparent"; }}>
+            {t("resetSettings")}
+          </button>
+        </SE>
+        {resetConfirm && (
+          <div onClick={() => setResetConfirm(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)" }}>
+            <div onClick={(e) => e.stopPropagation()}
+              style={{ background: "var(--c-bg2)", border: "1px solid var(--c-bd)", borderRadius: "12px", padding: "24px", width: "380px", maxWidth: "90vw", display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ fontSize: "16px", fontWeight: 700, color: C.txt, lineHeight: 1.6 }}>{t("resetSettings")}</div>
+              <div style={{ fontSize: "13px", color: C.t2, lineHeight: 1.8 }}>{t("resetSettingsConfirm")}</div>
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                <button onClick={() => setResetConfirm(false)}
+                  style={{ padding: "8px 16px", borderRadius: "6px", border: `1px solid ${C.border}`, background: "transparent", color: C.t2, fontSize: "12px", cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6 }}>
+                  {t("cancel")}
+                </button>
+                <button onClick={() => { resetSettings(); setResetConfirm(false); setModalMsg("✅ " + t("resetSettingsDone")); }}
+                  style={{ padding: "8px 16px", borderRadius: "6px", border: "none", background: "#ef4444", color: "#fff", fontSize: "12px", cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6 }}>
+                  {t("delete")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
+
         {/* ── 用户 ── */}
         <SE yolo={y} title={t("userSection")} desc={t("userSectionDesc")}>
           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
@@ -262,10 +295,24 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
           <div style={{ marginBottom: "28px" }}>
             <div style={fl}>{t("uiLanguage")}</div>
             <div style={{ position: "relative" }}>
-              <select value={locale} onChange={(e) => setLocale(e.target.value as "zh-CN" | "en-US")} style={ss}>{/*...*/}
-                <option value="zh-CN">汉语 (Chinese, China)</option><option value="en-US">英语 (English, United States)</option>
+              <select value={locale} onChange={(e) => setLocale(e.target.value as "zh-CN" | "en-US" | "de-DE")} style={ss}>
+                {SUPPORTED_LOCALES.map((loc) => (<option key={loc.value} value={loc.value}>{loc.label}</option>))}
               </select>{sc}
             </div>
+            <div style={{ fontSize: "11px", color: C.t4, marginTop: "6px", lineHeight: 1.6 }}>{t("uiLanguageDesc")}</div>
+          </div>
+          <div style={{ marginBottom: "28px" }}>
+            <div style={fl}>{t("preferredLanguage")}</div>
+            <div style={{ position: "relative" }}>
+              <select value={preferredLanguage} onChange={(e) => setPreferredLanguage(e.target.value as PreferredLanguage)} style={ss}>
+                {PREFERRED_LOCALES.map((loc) => {
+                  const prefLangSuffixes: Record<string, string> = { "zh-CN": "Zh", "en-US": "En", "de-DE": "De", "ja-JP": "Ja", "fr-FR": "Fr", "es-ES": "Es", "en-GB": "EnGB", "en-AU": "EnAU", "en-IN": "EnIN" };
+                  const suf = prefLangSuffixes[loc.value] || "En";
+                  return (<option key={loc.value} value={loc.value}>{t("prefLang" + suf)} / {t("lang" + suf)}</option>);
+                })}
+              </select>{sc}
+            </div>
+            <div style={{ fontSize: "11px", color: C.t4, marginTop: "6px", lineHeight: 1.6 }}>{t("preferredLanguageDesc")}</div>
           </div>
           <div style={{ marginBottom: "28px" }}>
             <div style={fl}>{t("uiFont")}</div>
@@ -431,12 +478,6 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
               <SW on={defaultReasoningOpen} oc={() => setDefaultReasoningOpen(!defaultReasoningOpen)} />
             </div>
           </div>
-          <button onClick={() => { if (confirm(t("resetSettingsConfirm"))) { resetSettings(); setModalMsg("✅ " + t("resetSettingsDone")); } }}
-            style={{ width: "100%", padding: "12px 0", borderRadius: "8px", border: "1px solid rgba(239,68,68,0.3)", background: "transparent", color: "#f87171", fontSize: "14px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s" }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.06)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.background = "transparent"; }}>
-            {t("resetSettings")}
-          </button>
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
@@ -451,169 +492,192 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE yolo={y} title={t("cookieManagement")} desc={t("cookieManagementDesc")}>
-          {cookieMsg && (
-            <div
-              onClick={() => setCookieMsg(null)}
-              style={{
-                padding: "10px 12px", borderRadius: "6px", fontSize: "12px", marginBottom: "16px", lineHeight: 1.6, cursor: "pointer",
-                color: cookieMsg.type === "ok" ? "#22c55e" : "#ef4444",
-                background: cookieMsg.type === "ok" ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
-              }}
-            >{cookieMsg.text}</div>
-          )}
-          <div style={{ marginBottom: "20px" }}>
-            {cookieInfo && cookieInfo.count > 0 ? (
-              <div>
-                <div style={{ fontSize: "12px", color: C.t2, lineHeight: 1.8 }}>
-                  {t("cookieCount").replace("{0}", String(cookieInfo.count)).replace("{1}", cookieInfo.domains.join(", "))}
-                </div>
-                <div style={{ fontSize: "11px", color: C.t4, lineHeight: 1.6, marginTop: "4px" }}>
-                  {t("cookieUpdated")}: {cookieInfo.updated_at}
-                </div>
+        <SE yolo={y} title={t("cookieManagement")}>
+          <div onClick={() => spE((v) => !v)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", cursor: "pointer", userSelect: "none", borderRadius: "8px", border: `1px solid ${C.border}`, lineHeight: 1.6, transition: "border-color 0.15s, background 0.15s" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "var(--c-bg3)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="1.8"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+              <span style={{ fontSize: "14px", fontWeight: 500, color: C.t2 }}>{t("cookieManagement")}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="2" style={{ transition: "transform 0.25s ease", transform: pExp ? "rotate(180deg)" : "rotate(0deg)" }}><polyline points="6 9 12 15 18 9" /></svg>
+            </div>
+          </div>
+
+          <AnimatedSection visible={pExp} maxHeight={800}>
+            <div style={{ paddingTop: "24px" }}>
+              <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.8, marginBottom: "20px" }}>{t("cookieManagementDesc")}</div>
+              {cookieMsg && (
+                <div onClick={() => setCookieMsg(null)}
+                  style={{ padding: "10px 12px", borderRadius: "6px", fontSize: "12px", marginBottom: "16px", lineHeight: 1.6, cursor: "pointer",
+                    color: cookieMsg.type === "ok" ? "#22c55e" : "#ef4444",
+                    background: cookieMsg.type === "ok" ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                  }}>{cookieMsg.text}</div>
+              )}
+              <div style={{ marginBottom: "20px" }}>
+                {cookieInfo && cookieInfo.count > 0 ? (
+                  <div>
+                    <div style={{ fontSize: "12px", color: C.t2, lineHeight: 1.8 }}>
+                      {t("cookieCount").replace("{0}", String(cookieInfo.count)).replace("{1}", cookieInfo.domains.join(", "))}
+                    </div>
+                    <div style={{ fontSize: "11px", color: C.t4, lineHeight: 1.6, marginTop: "4px" }}>
+                      {t("cookieUpdated")}: {cookieInfo.updated_at}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.6 }}>{t("cookieNoData")}</div>
+                )}
               </div>
-            ) : (
-              <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.6 }}>{t("cookieNoData")}</div>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button onClick={clearCookies}
-              style={{
-                flex: 1, padding: "12px 0", borderRadius: "8px",
-                border: cookieInfo && cookieInfo.count > 0 ? "1px solid rgba(239,68,68,0.3)" : "1px solid var(--c-bd)",
-                background: "transparent",
-                color: cookieInfo && cookieInfo.count > 0 ? "#f87171" : "var(--c-t4)",
-                fontSize: "13px", fontWeight: 600, cursor: cookieInfo && cookieInfo.count > 0 ? "pointer" : "default",
-                fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s",
-              }}
-              onMouseEnter={(e) => { if (cookieInfo && cookieInfo.count > 0) { e.currentTarget.style.borderColor = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.06)"; } }}
-              onMouseLeave={(e) => { if (cookieInfo && cookieInfo.count > 0) { e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.background = "transparent"; } }}
-              disabled={!cookieInfo || cookieInfo.count === 0}
-            >{t("cookieClear")}</button>
-            <button onClick={loadCookieInfo}
-              style={{
-                padding: "12px 16px", borderRadius: "8px", border: `1px solid ${C.border}`,
-                background: "transparent", color: C.t2, fontSize: "13px", fontWeight: 500,
-                cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "var(--c-bg3)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
-            </button>
-          </div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button onClick={clearCookies}
+                  style={{ flex: 1, padding: "12px 0", borderRadius: "8px",
+                    border: cookieInfo && cookieInfo.count > 0 ? "1px solid rgba(239,68,68,0.3)" : "1px solid var(--c-bd)",
+                    background: "transparent", color: cookieInfo && cookieInfo.count > 0 ? "#f87171" : "var(--c-t4)",
+                    fontSize: "13px", fontWeight: 600, cursor: cookieInfo && cookieInfo.count > 0 ? "pointer" : "default",
+                    fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s",
+                  }}
+                  onMouseEnter={(e) => { if (cookieInfo && cookieInfo.count > 0) { e.currentTarget.style.borderColor = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.06)"; } }}
+                  onMouseLeave={(e) => { if (cookieInfo && cookieInfo.count > 0) { e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)"; e.currentTarget.style.background = "transparent"; } }}
+                  disabled={!cookieInfo || cookieInfo.count === 0}>{t("cookieClear")}</button>
+                <button onClick={loadCookieInfo}
+                  style={{ padding: "12px 16px", borderRadius: "8px", border: `1px solid ${C.border}`, background: "transparent", color: C.t2, fontSize: "13px", fontWeight: 500, cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "var(--c-bg3)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+                </button>
+              </div>
+            </div>
+          </AnimatedSection>
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
-        <SE yolo={y} title="SearXNG 搜索服务" desc={`使用自建 SearXNG 实例进行联网搜索。
-SearXNG 需配置有效的实例地址，您可以通过 Docker Desktop 快速启动：
-  docker run -d --name searxng -p 8888:8080 searxng/searxng
-或使用 WSL2 内的 Docker：
-  wsl docker run -d --name searxng -p 8888:8080 searxng/searxng`}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
-            <span style={fl}>启用 SearXNG</span>
-            <SW on={searxng.enabled} oc={() => updateSearxng({ enabled: !searxng.enabled })} />
+        <SE yolo={y} title={t("internetSearchTitle")} desc={t("internetSearchDesc")}>
+          {/* ── 联网搜索主开关 ── */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
+            <span style={fl}>{t("internetSearchEnabled")}</span>
+            <SW on={internetSearchEnabled} oc={() => setInternetSearchEnabled(!internetSearchEnabled)} />
           </div>
-          <div style={{ marginBottom: "24px" }}>
-            <div style={fl}>实例地址</div>
-            <input
-              value={searxng.baseUrl}
-              onChange={(e) => updateSearxng({ baseUrl: e.target.value })}
-              style={{ ...is, fontFamily: "monospace" }}
-              placeholder="http://127.0.0.1:8888"
-            />
-            <div style={{ fontSize: "11px", color: C.t4, marginTop: "6px", lineHeight: 1.6 }}>
-              输入你的 SearXNG 实例地址，如 http://127.0.0.1:8888
+          <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.8, marginBottom: "28px" }}>
+            {internetSearchEnabled ? t("internetSearchDisabled") : t("internetSearchBlocked")}
+          </div>
+
+          {/* ── SearXNG 折叠子区块 ── */}
+          <div onClick={() => setSxExp((v) => !v)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", cursor: "pointer", userSelect: "none", borderRadius: "8px", border: `1px solid ${C.border}`, lineHeight: 1.6, transition: "border-color 0.15s, background 0.15s" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "var(--c-bg3)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="1.8"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+              <span style={{ fontSize: "14px", fontWeight: 500, color: C.t2 }}>{t("searxngExpand")}</span>
             </div>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="2" style={{ transition: "transform 0.25s ease", transform: sxExp ? "rotate(180deg)" : "rotate(0deg)" }}><polyline points="6 9 12 15 18 9" /></svg>
           </div>
-          <div style={{ marginBottom: "24px" }}>
-            <div style={fl}>搜索分类</div>
-            <input
-              value={searxng.categories}
-              onChange={(e) => updateSearxng({ categories: e.target.value })}
-              style={is}
-              placeholder="general,news"
-            />
-            <div style={{ fontSize: "11px", color: C.t4, marginTop: "6px", lineHeight: 1.6 }}>
-              逗号分隔，可选：general, news, images, videos, files, music, social, it
+
+          <AnimatedSection visible={sxExp} maxHeight={1500}>
+            <div style={{ paddingTop: "24px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px" }}>
+                <span style={fl}>{t("searxngEnable")}</span>
+                <SW on={searxng.enabled} oc={(e) => { e.stopPropagation(); updateSearxng({ enabled: !searxng.enabled }); }} />
+              </div>
+              <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.8, marginBottom: "24px" }}>{t("searxngDesc")}</div>
+              <div style={{ marginBottom: "24px" }}>
+                <div style={fl}>{t("searxngInstanceUrl")}</div>
+                <input
+                  value={searxng.baseUrl}
+                  onChange={(e) => updateSearxng({ baseUrl: e.target.value })}
+                  style={{ ...is, fontFamily: "monospace" }}
+                  placeholder="http://127.0.0.1:8888"
+                />
+                <div style={{ fontSize: "11px", color: C.t4, marginTop: "6px", lineHeight: 1.6 }}>
+                  {t("searxngInstanceUrlHint")}
+                </div>
+              </div>
+              <div style={{ marginBottom: "24px" }}>
+                <div style={fl}>{t("searxngCategories")}</div>
+                <input
+                  value={searxng.categories}
+                  onChange={(e) => updateSearxng({ categories: e.target.value })}
+                  style={is}
+                  placeholder="general,news"
+                />
+                <div style={{ fontSize: "11px", color: C.t4, marginTop: "6px", lineHeight: 1.6 }}>
+                  {t("searxngCategoriesHint")}
+                </div>
+              </div>
+              <div style={{ marginBottom: "24px" }}>
+                <div style={fl}>{t("searxngSearchLanguage")}</div>
+                <div style={{ position: "relative" }}>
+                  <select
+                    value={searxng.language}
+                    onChange={(e) => updateSearxng({ language: e.target.value })}
+                    style={ss}
+                  >
+                    <option value="all">{t("searxngAllLanguages")}</option>
+                    <option value="zh-CN">zh-CN（中文）</option>
+                    <option value="en-US">en-US（English）</option>
+                    <option value="ja-JP">ja-JP（日本語）</option>
+                  </select>{sc}
+                </div>
+              </div>
+              <div style={{ marginBottom: "24px" }}>
+                <div style={fl}>{t("searxngSafeSearch")}</div>
+                <div style={{ position: "relative" }}>
+                  <select
+                    value={String(searxng.safeSearch)}
+                    onChange={(e) => updateSearxng({ safeSearch: parseInt(e.target.value) })}
+                    style={ss}
+                  >
+                    <option value="0">{t("searxngSafeSearch0")}</option>
+                    <option value="1">{t("searxngSafeSearch1")}</option>
+                    <option value="2">{t("searxngSafeSearch2")}</option>
+                  </select>{sc}
+                </div>
+              </div>
+              <div style={{ marginTop: "12px" }}>
+                <button disabled={testing} onClick={async () => {
+                  if (!searxng.baseUrl) { setModalMsg(t("searxngEnterUrl")); return; }
+                  setTesting(true);
+                  try {
+                    const url = `${searxng.baseUrl.replace(/\/+$/, "")}/search?q=test&format=json&pageno=1`;
+                    const resp = await invoke<string>("http_fetch", {
+                      url,
+                      userAgent: "Unicoda/1.0",
+                      timeoutMs: 10000,
+                      noProxy: true,
+                      acceptHeader: "application/json",
+                    });
+                    const data = JSON.parse(resp);
+                    if (data && Array.isArray(data.results)) {
+                      setModalMsg("✅ " + t("searxngConnectSuccess") + " (" + data.results.length + " " + t("selected") + ")");
+                    } else {
+                      setModalMsg("⚠️ " + t("searxngConnectFail"));
+                    }
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    const lowMsg = msg.toLowerCase();
+                    let hint = "";
+                    if (lowMsg.includes("refused") || lowMsg.includes("connection refused")) {
+                      hint = "\n\n📋 " + t("searxngConnectFail") + ": " + msg;
+                    } else if (lowMsg.includes("timeout")) {
+                      hint = "\n\n📋 " + t("searxngConnectFail") + ": timeout";
+                    } else {
+                      hint = "\n\n📋 " + msg;
+                    }
+                    setModalMsg("❌ " + t("searxngConnectFail") + hint);
+                  } finally {
+                    setTesting(false);
+                  }
+                }}
+                  style={{ width: "100%", padding: "12px 0", borderRadius: "8px", border: `1px solid ${testing ? C.t4 : C.border}`, background: testing ? C.bg : C.bg, color: testing ? C.t4 : C.t2, fontSize: "13px", fontWeight: 600, cursor: testing ? "not-allowed" : "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s" }}
+                  onMouseEnter={(e) => { if (!testing) { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "var(--c-bg3)"; } }}
+                  onMouseLeave={(e) => { if (!testing) { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.bg; } }}>
+                  {testing ? "⏳ " + t("searxngTesting") : "🔗 " + t("searxngTestConnection")}
+                </button>
+              </div>
             </div>
-          </div>
-          <div style={{ marginBottom: "24px" }}>
-            <div style={fl}>搜索语言</div>
-            <div style={{ position: "relative" }}>
-              <select
-                value={searxng.language}
-                onChange={(e) => updateSearxng({ language: e.target.value })}
-                style={ss}
-              >
-                <option value="all">all（不限）</option>
-                <option value="zh-CN">zh-CN（中文）</option>
-                <option value="en-US">en-US（英文）</option>
-                <option value="ja-JP">ja-JP（日文）</option>
-              </select>{sc}
-            </div>
-          </div>
-          <div style={{ marginBottom: "24px" }}>
-            <div style={fl}>安全搜索</div>
-            <div style={{ position: "relative" }}>
-              <select
-                value={String(searxng.safeSearch)}
-                onChange={(e) => updateSearxng({ safeSearch: parseInt(e.target.value) })}
-                style={ss}
-              >
-                <option value="0">0 - 关闭</option>
-                <option value="1">1 - 中等</option>
-                <option value="2">2 - 严格</option>
-              </select>{sc}
-            </div>
-          </div>
-          <div style={{ marginTop: "12px" }}>
-            <button disabled={testing} onClick={async () => {
-              if (!searxng.baseUrl) { setModalMsg("请先输入 SearXNG 实例地址"); return; }
-              setTesting(true);
-              try {
-                const url = `${searxng.baseUrl.replace(/\/+$/, "")}/search?q=test&format=json&pageno=1`;
-                const resp = await invoke<string>("http_fetch", {
-                  url,
-                  userAgent: "Unicoda/1.0",
-                  timeoutMs: 10000,
-                  noProxy: true,
-                  acceptHeader: "application/json",
-                });
-                const data = JSON.parse(resp);
-                if (data && Array.isArray(data.results)) {
-                  setModalMsg(`✅ 连接成功！实例返回了 ${data.results.length} 条搜索结果。\n\n现在可以启用 SearXNG 进行联网搜索了。`);
-                } else {
-                  setModalMsg("⚠️ 响应格式异常\n\nSearXNG 返回了非预期的 JSON 结构。请检查实例配置是否正确。");
-                }
-              } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                const lowMsg = msg.toLowerCase();
-                let hint = "";
-                if (lowMsg.includes("refused") || lowMsg.includes("connection refused")) {
-                  hint = "\n\n📋 诊断：连接被拒绝\n\nSearXNG 实例未启动，或地址/端口不正确。\n\nWindows 下快速启动（需安装 Docker Desktop）：\n  docker run -d --name searxng -p 8888:8080 searxng/searxng\n\n或使用 WSL2 中的 Docker：\n  wsl docker run -d --name searxng -p 8888:8080 searxng/searxng\n\n然后浏览器打开 http://localhost:8888 确认可正常访问。";
-                } else if (lowMsg.includes("timeout")) {
-                  hint = "\n\n📋 诊断：连接超时\n\n实例地址不可达，请检查：\n• 实例是否已启动\n• 防火墙是否允许 8888 端口\n• 如果使用远程 IP，确认网络互通";
-                } else if (lowMsg.includes("dns") || lowMsg.includes("dns")) {
-                  hint = "\n\n📋 诊断：DNS 解析失败\n\n域名无法解析，请检查地址拼写或改用 IP 地址。";
-                } else if (lowMsg.includes("tls") || lowMsg.includes("ssl") || lowMsg.includes("certificate")) {
-                  hint = "\n\n📋 诊断：TLS/SSL 证书错误\n\nHTTPS 证书验证失败。如果使用自签名证书，可在 SearXNG 中关闭 HTTPS 改用 HTTP。";
-                } else {
-                  hint = `\n\n📋 诊断：\n${msg}\n\n💡 检查要点：\n1. 请用 PowerShell 验证：Invoke-RestMethod -Uri "http://localhost:8888/search?q=test&format=json" -Headers @{"Accept"="application/json"}\n2. 如果 PowerShell 能访问但应用不行，请关闭代理后重启 Unicoda\n3. 尝试 'cargo clean' 后重建：cargo clean && npm run tauri dev`;
-                }
-                setModalMsg(`❌ 连接失败\n${hint}`);
-              } finally {
-                setTesting(false);
-              }
-            }}
-              style={{ width: "100%", padding: "12px 0", borderRadius: "8px", border: `1px solid ${testing ? C.t4 : C.border}`, background: testing ? C.bg : C.bg, color: testing ? C.t4 : C.t2, fontSize: "13px", fontWeight: 600, cursor: testing ? "not-allowed" : "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s" }}
-              onMouseEnter={(e) => { if (!testing) { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "var(--c-bg3)"; } }}
-              onMouseLeave={(e) => { if (!testing) { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.bg; } }}>
-              {testing ? "⏳ 测试中..." : "🔗 测试连接"}
-            </button>
-          </div>
+          </AnimatedSection>
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 

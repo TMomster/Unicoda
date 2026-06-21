@@ -556,6 +556,108 @@ fn list_directory(path: String) -> Result<Vec<DirEntry>, String> {
 }
 
 #[derive(serde::Serialize)]
+struct SearchFileResult {
+    path: String,
+    size: u64,
+}
+
+/// 在本地文件系统中按 glob 模式递归搜索文件。
+/// 一次性在 Rust 端完成遍历，避免多次 IPC 调用。
+#[tauri::command]
+fn search_files(
+    root_path: String,
+    pattern: String,
+    max_results: Option<u32>,
+    max_depth: Option<usize>,
+    case_sensitive: Option<bool>,
+) -> Result<Vec<SearchFileResult>, String> {
+    let root = std::path::Path::new(&root_path);
+    if !root.exists() {
+        return Err(format!("目录不存在: {}", root_path));
+    }
+    if !root.is_dir() {
+        return Err(format!("不是目录: {}", root_path));
+    }
+
+    let max_results = max_results.unwrap_or(50).min(200) as usize;
+    let max_depth = max_depth.unwrap_or(10).min(20);
+    let case_sensitive = case_sensitive.unwrap_or(false);
+
+    // 将 glob 模式转换为正则表达式
+    let mut regex_str = String::from("^");
+    for ch in pattern.chars() {
+        match ch {
+            '*' => regex_str.push_str(".*"),
+            '?' => regex_str.push('.'),
+            '.' | '+' | '^' | '$' | '{' | '}' | '(' | ')' | '|' | '[' | ']' | '\\' => {
+                regex_str.push('\\');
+                regex_str.push(ch);
+            }
+            _ => regex_str.push(ch),
+        }
+    }
+    regex_str.push('$');
+
+    let re = if case_sensitive {
+        regex::Regex::new(&regex_str).map_err(|e| format!("正则表达式错误: {}", e))?
+    } else {
+        regex::RegexBuilder::new(&regex_str)
+            .case_insensitive(true)
+            .build()
+            .map_err(|e| format!("正则表达式错误: {}", e))?
+    };
+
+    // 跳过隐藏目录和已知系统/缓存目录
+    let skip_dirs: [&str; 6] = [".git", ".svn", ".hg", "node_modules", ".cache", "__pycache__"];
+
+    let mut results = Vec::new();
+    let walker = walkdir::WalkDir::new(&root_path)
+        .max_depth(max_depth)
+        .follow_links(false)
+        .into_iter();
+
+    for entry in walker {
+        if results.len() >= max_results {
+            break;
+        }
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        // 跳过隐藏目录（以 . 开头）
+        if entry
+            .file_name()
+            .to_str()
+            .map(|s| s.starts_with('.'))
+            .unwrap_or(false)
+            && entry.file_type().is_dir()
+        {
+            continue;
+        }
+
+        // 跳过已知系统/缓存目录
+        if entry.file_type().is_dir() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if skip_dirs.contains(&name.as_str()) {
+                continue;
+            }
+        }
+
+        if entry.file_type().is_file() {
+            let name = entry.file_name().to_string_lossy();
+            if re.is_match(&name) {
+                let path = entry.path().to_string_lossy().to_string();
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                results.push(SearchFileResult { path, size });
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+#[derive(serde::Serialize)]
 struct PathMetadata {
     exists: bool,
     is_dir: bool,
@@ -627,7 +729,8 @@ fn read_text_file_at(path: String, max_bytes: Option<u64>) -> Result<String, Str
 
     if let Some(max) = max_bytes {
         if (content.len() as u64) > max {
-            let mut truncated = content[..max as usize].to_string();
+            let safe_max = content.floor_char_boundary(max as usize);
+            let mut truncated = content[..safe_max].to_string();
             truncated.push_str("\n\n... [内容过长，已截断]");
             return Ok(truncated);
         }
@@ -959,6 +1062,7 @@ pub fn run() {
             load_file_from_path,
             remove_file_at_path,
             list_directory,
+            search_files,
             get_path_metadata,
             read_text_file_at,
             get_home_directory,

@@ -304,7 +304,7 @@ export default function PrintDialog({
   // 根据设置过滤显示的消息（需在 toggleSelect 之前定义，避免 TDZ）
   const displayMessages = messages.filter((m) => {
     if (m.role === "system") return false;
-    if (m.role === "assistant" && m.content.startsWith("[对话历史摘要]")) return false;
+    if (m.role === "assistant" && (m.content.startsWith("[对话历史摘要]") || m.content.startsWith("[Conversation History Summary]"))) return false;
     if (hideToolCalls && m.role === "tool") return false;
     if (hideDebugInfo && m.role === "assistant" && m.toolDebugInfo && m.toolDebugInfo.length > 0) return false;
     return true;

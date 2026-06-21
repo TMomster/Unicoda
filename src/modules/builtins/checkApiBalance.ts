@@ -34,8 +34,8 @@ const KNOWN_PROVIDERS: Record<string, BalanceEndpoint> = {
       if (!data?.balance_infos?.length) return null;
       const b = data.balance_infos[0];
       const lines: string[] = [
-        `\uD83D\uDCB0 DeepSeek 余额信息`,
-        `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
+        `💰 DeepSeek 余额信息`,
+        `━━━━━━━━━━━━━━━━━━`,
         `总余额：${b.total_balance} ${b.currency || "CNY"}`,
       ];
       if (b.topped_up_balance) lines.push(`已充值：${b.topped_up_balance} ${b.currency || "CNY"}`);
@@ -50,8 +50,8 @@ const KNOWN_PROVIDERS: Record<string, BalanceEndpoint> = {
       const d = data?.data;
       if (!d) return null;
       const lines: string[] = [
-        `\uD83D\uDD11 OpenRouter 密钥信息`,
-        `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
+        `🔑 OpenRouter 密钥信息`,
+        `━━━━━━━━━━━━━━━━━━━━`,
         `标签：${d.label || "未命名"}`,
         `剩余限额：${d.limit_remaining ?? "未知"}`,
         `已用量：${d.usage ?? "未知"}`,
@@ -67,19 +67,19 @@ const KNOWN_PROVIDERS: Record<string, BalanceEndpoint> = {
       const balance = data?.balance;
       if (balance === undefined || balance === null) return null;
       return [
-        `\uD83D\uDCB0 SiliconFlow 余额信息`,
-        `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
+        `💰 SiliconFlow 余额信息`,
+        `━━━━━━━━━━━━━━━━━━━━`,
         `余额：${balance} 元`,
       ].join("\n");
     },
   },
   OpenAI: {
-    path: "/v1/dashboard/billing/credit_grants",
+    path: "https://api.openai.com/v1/dashboard/billing/credit_grants",
     parse: (data: any) => {
       if (!data) return null;
       const lines: string[] = [
-        `\uD83D\uDCB0 OpenAI 额度信息`,
-        `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
+        `💰 OpenAI 额度信息`,
+        `━━━━━━━━━━━━━━━━━━`,
       ];
       if (data.total_granted !== undefined) lines.push(`总额度：$${data.total_granted.toFixed(2)}`);
       if (data.total_used !== undefined) lines.push(`已使用：$${data.total_used.toFixed(2)}`);
@@ -107,7 +107,7 @@ const mod: Module = {
   id: "check_api_balance",
   name: "查询 API 余额",
   description:
-    "查询当前 AI 模型的 API 余额和用量信息。支持 DeepSeek、OpenRouter、SiliconFlow、OpenAI 等主流提供商。当用户询问'还有多少额度'、'余额还剩多少'、'API 还能用多久'时调用此模组。注意：余额信息需联网查询，部分提供商可能不提供余额 API。",
+    `查询当前 AI 模型的 API 余额和用量信息。支持 DeepSeek、OpenRouter、SiliconFlow、OpenAI 等主流提供商。当用户询问"还有多少额度"、"余额还剩多少"、"API 还能用多久"时调用此模组。注意：余额信息需联网查询，部分提供商可能不提供余额 API。`,
   userDescription: "查询 API 余额和用量信息",
   level: "normal",
   parameters: [
@@ -200,8 +200,8 @@ const mod: Module = {
           const balance = data.balance ?? data.data?.balance ?? data.total_balance;
           if (balance !== undefined) {
             yield [
-              `\uD83D\uDCB0 ${provider || "当前服务"} 余额信息`,
-              `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501`,
+              `💰 ${provider || "当前服务"} 余额信息`,
+              `━━━━━━━━━━━━━━━━━━`,
               `余额：${balance}`,
             ].join("\n");
             return;
@@ -215,13 +215,13 @@ const mod: Module = {
     // 4. 所有尝试均失败
     const providerName = provider || (baseUrl ? baseUrl.replace(/https?:\/\//, "").split("/")[0] : "当前服务");
     yield [
-      `\u26A0\uFE0F 无法查询 "${providerName}" 的余额信息。`,
+      `⚠️ 无法查询 "${providerName}" 的余额信息。`,
       ``,
       `可能的原因：`,
-      `\u2022 该服务商未提供公开的余额查询 API`,
-      `\u2022 网络连接异常`,
-      `\u2022 API Key 无权访问余额接口`,
-      `\u2022 本地模型（如 Ollama/LM Studio）无需查询余额`,
+      `• 该服务商未提供公开的余额查询 API`,
+      `• 网络连接异常`,
+      `• API Key 无权访问余额接口`,
+      `• 本地模型（如 Ollama/LM Studio）无需查询余额`,
     ].join("\n");
   },
 };

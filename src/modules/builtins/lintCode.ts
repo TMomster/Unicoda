@@ -98,36 +98,43 @@ async function runCmd(
   }
 }
 
+// ── PowerShell 路径安全转义 ───────────────────────
+// PowerShell 双引号字符串中，" 需要写作 "" 转义
+function escapePSPath(p: string): string {
+  // PowerShell 双引号字符串中，" 需要写作 "" 转义，$ 需要写作 `$ 转义，反引号需要写作 `` 转义
+  return p.replace(/`/g, "``").replace(/\$/g, "`$").replace(/"/g, '""');
+}
+
 // ── 各语言的 lint 命令构建 ─────────────────────────
 
 function buildLintCommand(language: string, path: string, code: string): string {
   // json 不走命令
   if (language === "json") return "";
 
-  const escapedPath = path.includes(" ") ? `'${path}'` : path;
+  const safePath = escapePSPath(path);
 
   switch (language) {
     case "javascript":
     case "jsx":
       // 优先检查本地 eslint，否则用 npx
-      return `if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint "${path}" } else { npx --yes eslint "${path}" }`;
+      return `if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint "${safePath}" } else { npx --yes eslint "${safePath}" }`;
     case "typescript":
     case "tsx":
-      return `if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint --ext .ts,.tsx "${path}" } else { npx --yes eslint --ext .ts,.tsx "${path}" }`;
+      return `if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint --ext .ts,.tsx "${safePath}" } else { npx --yes eslint --ext .ts,.tsx "${safePath}" }`;
     case "css":
     case "scss":
     case "less":
-      return `if (Get-Command stylelint -ErrorAction SilentlyContinue) { stylelint "${path}" } else { npx --yes stylelint "${path}" }`;
+      return `if (Get-Command stylelint -ErrorAction SilentlyContinue) { stylelint "${safePath}" } else { npx --yes stylelint "${safePath}" }`;
     case "html":
-      return `if (Get-Command htmlhint -ErrorAction SilentlyContinue) { htmlhint "${path}" } else { npx --yes htmlhint "${path}" }`;
+      return `if (Get-Command htmlhint -ErrorAction SilentlyContinue) { htmlhint "${safePath}" } else { npx --yes htmlhint "${safePath}" }`;
     case "markdown":
-      return `if (Get-Command markdownlint -ErrorAction SilentlyContinue) { markdownlint "${path}" } else { npx --yes markdownlint-cli "${path}" }`;
+      return `if (Get-Command markdownlint -ErrorAction SilentlyContinue) { markdownlint "${safePath}" } else { npx --yes markdownlint-cli "${safePath}" }`;
     case "python":
-      return `python -m flake8 "${path}" 2> $null; if ($LASTEXITCODE -ne 0) { python -m pylint "${path}" 2> $null }`;
+      return `python -m flake8 "${safePath}" 2> $null; if ($LASTEXITCODE -ne 0) { python -m pylint "${safePath}" 2> $null }`;
     case "rust":
       return `cargo clippy --all-targets 2>&1`;
     case "yaml":
-      return `if (Get-Command yamllint -ErrorAction SilentlyContinue) { yamllint "${path}" } else { python -m yamllint "${path}" 2> $null }`;
+      return `if (Get-Command yamllint -ErrorAction SilentlyContinue) { yamllint "${safePath}" } else { python -m yamllint "${safePath}" 2> $null }`;
     default:
       return "";
   }

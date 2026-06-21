@@ -9,6 +9,7 @@
  * 5. 二次调用 LLM 产最终回复
  */
 import type { Mode, PanelMode, ModelConfig } from "../types";
+import type { PreferredLanguage } from "../i18n";
 import { getAllModules, getModule } from "../modules/registry";
 import { getModulesForMode } from "../modules/types";
 import { formatKnowledgeForPrompt } from "./knowledgeBase";
@@ -53,9 +54,10 @@ import type { KnowledgeMode } from "./knowledgeBase";
 /**
  * 构建知识库段落，将预装填知识库注入到系统提示词中。
  * @param kbMode  知识库层级过滤（framework 全部可见，normal/yolo 各自可见）
+ * @param locale  用于时间格式化的语言环境
  */
-function buildKnowledgeSection(kbMode?: KnowledgeMode): string {
-  return formatKnowledgeForPrompt(kbMode);
+function buildKnowledgeSection(kbMode?: KnowledgeMode, locale?: string): string {
+  return formatKnowledgeForPrompt(kbMode, locale);
 }
 
 /**
@@ -72,12 +74,138 @@ export function buildAgentSystemPrompt(
   workspacePath?: string,
   kbMode?: KnowledgeMode,
   panelMode?: PanelMode,
+  preferredLanguage?: PreferredLanguage,
 ): string {
   const parts: string[] = [];
 
   // ═══════════════════════════════════════════════════════════
-  // 第 1 部分：Unicoda 基础角色设定（所有模式均注入）
+  // 第 0 部分：偏好语言指令（最优先注入，放在所有内容最前面）
+  // 确保模型在阅读任何其他指令前先看到语言要求
   // ═══════════════════════════════════════════════════════════
+  if (preferredLanguage) {
+    const langInstr: Record<string, string> = {
+      "zh-CN": "【严格语言指令】你必须全程使用汉语（中文）输出，包括所有推理过程、深度思考内容、分析步骤和最终回复。任何情况下都不得使用其他语言。",
+      "en-US": "【STRICT LANGUAGE RULE】You MUST output in American English (en-US) at all times. Use American spelling (e.g. color, realize, center), vocabulary, and conventions. This includes all reasoning steps, deep thinking content, analysis, and final responses. Do NOT switch to any other language under any circumstances.",
+      "de-DE": "【STRENGE SPRACHREGEL】Sie MÜSSEN durchgehend auf Deutsch antworten. Dies gilt für alle Überlegungsschritte, tiefgehende Gedanken, Analysen und die endgültige Antwort. Verwenden Sie unter keinen Umständen eine andere Sprache.",
+      "ja-JP": "【厳格な言語ルール】すべての出力を日本語で行ってください。思考プロセス、深い推論内容、分析ステップ、最終回答のすべてを含みます。いかなる状況でも他の言語に切り替えないでください。",
+      "fr-FR": "【RÈGLE LINGUISTIQUE STRICTE】Vous devez impérativement répondre en français à tout moment. Cela inclut tous les raisonnements, réflexions approfondies, étapes d'analyse et réponses finales. Ne passez à aucune autre langue, quelles que soient les circonstances.",
+      "es-ES": "【REGLA DE IDIOMA ESTRICTA】Debe responder exclusivamente en español en todo momento. Esto incluye todos los procesos de razonamiento, pensamientos profundos, pasos de análisis y respuestas finales. No cambie a ningún otro idioma bajo ninguna circunstancia.",
+    };
+    const instr = langInstr[preferredLanguage];
+    if (instr) parts.push(instr);
+
+    // 英语地区特化版本：注入各变体专属适应指令（含具体差异说明）
+    if (preferredLanguage.startsWith("en-") && preferredLanguage !== "en-US") {
+      const regionalInstr: Record<string, string> = {
+        "en-GB": `【BRITISH ENGLISH ADAPTATION】You have been configured for British English (en-GB). You MUST follow these British conventions precisely:
+
+**Spelling:**
+- Use -our (colour, flavour, honour, behaviour) — NEVER color, flavor, honor
+- Use -re (centre, theatre, metre, litre) — NEVER center, theater
+- Use -ise/-isation (realise, organise, recognise, organisation, globalisation) — realize/organize/globalization are American
+- Use -t (learnt, dreamt, burnt, spelt) — learned/dreamed/burned/spelled are American
+- Double L in derivatives (travelled, labelled, cancelling, modelling) — traveled/labeled/canceling are American
+- Use defence, offence, licence (noun), practice (noun) — defense, offense, license are American
+- Use programme (for TV/events) but program (for software)
+- Use aluminium (NOT aluminum), grey (NOT gray)
+
+**Vocabulary:**
+- flat (NOT apartment), lift (NOT elevator), autumn (NOT fall), holiday (NOT vacation)
+- torch (NOT flashlight), rubbish (NOT trash/garbage), boot (of car, NOT trunk), bonnet (NOT hood)
+- chips (NOT fries), biscuit (NOT cookie), sweets (NOT candy), pudding (NOT dessert)
+- football (NOT soccer), fortnight (NOT two weeks), queue (NOT line), cinema (NOT movie theater)
+- trousers (NOT pants), trainers (NOT sneakers), nappy (NOT diaper), dummy (NOT pacifier)
+- post (NOT mail), petrol (NOT gas/gasoline), mobile phone (NOT cell phone)
+- solicitor / barrister (NOT lawyer generally), chemist (NOT pharmacy/drugstore)
+- courgette (NOT zucchini), aubergine (NOT eggplant), coriander (NOT cilantro)
+
+**Date & Time Format:**
+- Dates: day/month/year — e.g. 21 June 2026 or 21/06/2026 (NEVER month/day/year)
+- Time: 24-hour clock is widely used (e.g. 14:30), or 12-hour with dot (e.g. 2.30pm)
+- Write "30 June" not "June 30" in running text
+
+**Grammar & Style:**
+- Use present perfect for recent actions: "I have just eaten" not "I just ate"
+- Collective nouns can take singular or plural: "the team are playing" is common
+- Use "shall" for first-person suggestions: "Shall we go?"
+- Use "got" not "gotten" as past participle of get
+- Single quotes (' ') are more common for quotations than double quotes
+- Use "at the weekend" (NOT "on the weekend"), "in hospital" (NOT "in the hospital")`,
+
+        "en-AU": `【AUSTRALIAN ENGLISH ADAPTATION】You have been configured for Australian English (en-AU). You MUST follow these Australian conventions precisely:
+
+**Spelling:**
+- Follow British English: -our (colour, flavour, honour), -re (centre, theatre), -ise (realise, organise)
+- Double L (travelled, labelled) — same as British
+- Use programme/program distinction same as British
+- Use aluminium, grey, gaol (though jail is also accepted)
+
+**Vocabulary:**
+- Unique Australian terms: footy (football/rugby), arvo (afternoon), brekkie (breakfast), barbie (barbecue)
+- bogan (uncouth person), esky (cooler/chiller), thongs (flip-flops), bathers/togs (swimsuit)
+- servo (petrol station/gas station), bottle-o (bottle shop/liquor store), maccas (McDonald's)
+- mate (friend, used very frequently), fair dinkum (genuine/real), no worries (you're welcome)
+- Diminutives (-ie/-o suffix) are extremely common: postie (postman), tradie (tradesman), muso (musician), journo (journalist), garbo (garbage collector), smoko (smoke break)
+- footpath (pavement/sidewalk), gumboots (wellingtons/waders), singlet (vest/tank top)
+- capsicum (bell pepper), rocket (arugula), zucchini (same as American for this one)
+- lolly (candy/sweet), bikkie (biscuit/cookie), chippies (potato chips)
+
+**Date & Time Format:**
+- Dates: day/month/year — e.g. 21 June 2026 or 21/06/2026
+- Time: 24-hour clock common (e.g. 14:30)
+
+**Grammar & Style:**
+- Present perfect for recent events (same as British)
+- Use "got" not "gotten"
+- "heaps of" used frequently (meaning "a lot of")
+- "as well" at end of sentences more common than "too"
+- Frequent use of "aye" as question tag in some regions
+- Casual register is more informal than British English`,
+
+        "en-IN": `【INDIAN ENGLISH ADAPTATION】You have been configured for Indian English (en-IN). You MUST follow these Indian English conventions precisely:
+
+**Spelling:**
+- Follow British English: -our (colour, flavour, honour), -re (centre, theatre), -ise (realise, organise)
+
+**Vocabulary (distinctive Indian usages):**
+- prepone (to reschedule to an earlier time — opposite of postpone)
+- do the needful / do the needful and oblige / kindly do the needful (please take the necessary action)
+- revert back (meaning "reply back" or "get back to someone")
+- pass out (meaning "graduate" — "she passed out of university in 2024")
+- cousin brother / cousin sister (for male/female cousin respectively)
+- meet (an arranged marriage introduction meeting between families)
+- out of station (out of town / away from one's usual place of work/residence)
+- timepass (something done to pass time/idle activity)
+- also (used as "and also/too" more frequently than in other variants)
+- the same / the said (used in formal writing as: "please revert on the same")
+- kindly adjust / adjust (make do with what is available)
+- updation (update as a noun — "the updation of records")
+- under the same (a phrase used in billing: "under the same head")
+- would be (used more broadly for future tense: "the meeting would be held")
+- only / itself (used for emphasis: "I came only yesterday", "he himself came")
+- what is your good name? (formal: what is your name?)
+- rubber (eraser), tiffin (lunch box), hotel (can mean restaurant)
+- dress (can mean clothing in general, not just a formal dress)
+
+**Date & Time Format:**
+- Dates: day/month/year — e.g. 21 June 2026 or 21/06/2026
+- Time: 12-hour clock common with am/pm
+- IST (Indian Standard Time, UTC+5:30) is the reference timezone
+
+**Grammar & Style:**
+- Present continuous tense is used more broadly: "I am understanding it now", "I am having a car"
+- "Isn't it?" used as a universal tag question regardless of main verb: "You went there, isn't it?"
+- Use of "would" where other varieties use "will": "I would be going to the market"
+- Formal register is more verbose and polite than other English varieties
+- "I am having" used where other dialects use "I have"`,
+      };
+      const ri = regionalInstr[preferredLanguage];
+      if (ri) parts.push(ri);
+    }
+  } else {
+    console.warn("[agentEngine] preferredLanguage is empty/falsy, no language instruction injected");
+  }
+
   // ═══════════════════════════════════════════════════════════
   // 工作区上下文注入（Yolo 模式专用）
   // ═══════════════════════════════════════════════════════════
@@ -325,12 +453,19 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
 3. **\`summary_page\`**：搜索结果是长篇文章，需要快速了解核心观点时使用
    - 适用于：新闻报道、分析报告、百科条目的要点提炼
    - 需在搜索结果已经返回后再调用此模组
-4. **\`read_from_files\`**：用户询问本地文件、想浏览目录、查看或读取某个文件时使用
-   - 适用于：用户问"看看我的桌面有什么"、"帮我打开这个文件"、"当前在什么路径"、"进入某个目录"
+4. **\`read_from_files\`**：用户想浏览目录结构、查看或读取某个文件时使用
+   - 适用于：用户问"看看我的桌面有什么"、"当前在什么路径"、"进入某个目录"
    - 用户问"当前目录有什么文件"时，先用 \`pwd\` 获取当前路径，再调用 \`list_dir\`
    - 用户说"读取/查看某个文件"时，调用 \`read_file\`
 
-5. **\`search_in_project\`**：在本地项目中搜索文件名或文件内容
+5. **\`search_file\`**：在本地文件系统中按文件名搜索文件
+   - 适用于：用户问"帮我找找某个游戏/文件/安装包在哪"、"XX文件放在哪了"、"找不到XX"
+   - 支持 glob 通配符（* 任意字符、? 单个字符），如 \`search_file(pattern="*游戏名*", path="D:\\")\`
+   - 自动跳过隐藏目录和系统目录
+   - **与 read_from_files 的区别**：用户给出明确的文件名/关键词线索时应优先用 \`search_file\`（如"找一下SanobaWitch"、"有没有一个叫Report的PDF"）；只有用户想看目录结构时（"看看桌面上有什么"）才用 \`read_from_files list_dir\`
+   - **搜不到时换姿势重试**：如果第一次搜索结果不理想（没有结果），换用不同拼写/大小写/关键词的 pattern 再次搜索，甚至换一个目录搜索
+
+6. **\`search_in_project\`**：在本地项目中搜索文件名或文件内容
    - 适用于：搜索函数定义、变量引用、TODO 标记、导入语句
    - 用户说"帮我找找项目中哪里用到了XXX"、"搜索XXX关键词"时调用
    - 支持 \`pattern\` 参数筛选文件类型（如 \`"*.ts"\` 只搜索 TypeScript 文件）
@@ -384,9 +519,136 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
   }
 
   // ═══════════════════════════════════════════════════════════
-  // Agent 模式专用：场景判断 + 搜索关键词指南
+  // Agent 模式专用：任务计划模式
   // ═══════════════════════════════════════════════════════════
   if (mode === "Agent") {
+    parts.push(`## 🗺️ 任务计划模式（Task Planning Mode）
+
+对于需要**多个步骤**的复杂任务（如先搜索再打开网页、多维度搜索、文件定位+分析、逐级目录探索等），你应当使用**任务计划模式**来避免执行中的自我质疑和反复。
+
+### 何时使用任务计划模式
+
+当用户请求涉及以下场景时，使用 \`<task_plan>\` 代替多个独立的 \`<tool_call>\`：
+
+1. **多步文件定位**：用户找文件但不记得确切路径 → 需要逐级查看多个目录
+2. **组合搜索**：用户需要多个维度的信息 → 需要多个搜索词或多个工具
+3. **搜索+分析**：先搜索获取信息，再打开页面深入阅读
+4. **目录探索**：用户想看看某个位置有什么文件，需要逐级深入
+5. **任何需要 2 步以上的任务**
+
+**对于只需要一步工具的简单任务**：仍然使用 \`<tool_call>\`，无需任务计划。
+
+### 输出格式
+
+在回复中输出一个 \`<task_plan>\` XML 标记块，格式如下：
+
+\`\`\`
+<task_plan>
+{
+  "intent": "简要描述用户意图",
+  "feasibility": "可行性分析：需要哪些工具、可能的挑战",
+  "steps": [
+    {
+      "id": "step-1",
+      "tool": "模块ID",
+      "params": { "参数名": "参数值" },
+      "description": "本步骤的目的说明"
+    },
+    {
+      "id": "step-2",
+      "tool": "模块ID",
+      "params": { "参数名": "参数值" },
+      "description": "本步骤的目的说明"
+    }
+  ]
+}
+</task_plan>
+\`\`\`
+
+### 执行规则
+
+- **输出 \`<task_plan>\` 后不要输出其他文本**，框架会自动执行所有步骤
+- 计划中的所有步骤会按顺序**依次执行**
+- 所有步骤的结果会**一起返回**给你
+- 你只需阅读汇总结果后生成最终回复——**中间不需要你干预**
+- **计划执行完成后，框架会注入一条"禁止新工具调用"的强制指令。你必须严格遵守该指令，只生成最终回复，不得输出任何新的 \`<tool_call>\` 或 \`<task_plan>\`。**
+- **如果你在最终回复时仍然想"我再搜搜看"、"再确认一下"——不要这么做。所有搜索已在计划中完成，基于已有结果回答即可。**
+
+### 🎯 制定计划前必须核对用户原始意图
+
+在制定任务计划之前，你必须先**仔细阅读并理解用户的最新一条消息**，确认用户真正要做什么。
+
+**常见错误（必须避免）：**
+- ❌ 用户说"帮我找 RiddleJoker" → 你计划里写的是"查找 Sanoba Witch"
+- ❌ 用户说"在 G 盘找" → 你计划里写的是"查看 C 盘桌面"
+- ❌ 用户说"是什么颜色" → 你计划里计划去搜价格
+
+**正确做法：**
+- 在 intent 字段中**直接引用用户原话**，如："用户想找 G 盘上的 RiddleJoker 游戏"
+- 如果用户提到了多个信息，**全部检查是否都包含在计划中**，不要遗漏
+- 如果用户的问题中有任何不确定的细节，在你的 feasibility 中注明你的假设
+
+### 与传统 tool_call 的区别
+
+| 场景 | 使用 |
+|------|------|
+| 只需要一个工具调用 | \`<tool_call>\`（简单快速） |
+| 需要 2 个以上串联工具调用 | \`<task_plan>\`（避免自我质疑） |
+| 不确定需要几步 | \`<task_plan>\`（框架会处理所有步骤） |
+
+### 实际示例
+
+**文件查找**：
+\`\`\`
+<task_plan>
+{
+  "intent": "在G盘查找RiddleJoker游戏文件位置",
+  "feasibility": "RiddleJoker是Yuzusoft开发的视觉小说，Steam发行，可能在SteamLibrary或games目录下",
+  "steps": [
+    {
+      "id": "step-1",
+      "tool": "read_from_files",
+      "params": {"action": "list_dir", "path": "G:\\\\SteamLibrary\\\\steamapps\\\\common\\\\"},
+      "description": "查看Steam游戏库目录中是否有RiddleJoker"
+    },
+    {
+      "id": "step-2",
+      "tool": "read_from_files",
+      "params": {"action": "list_dir", "path": "G:\\\\games\\\\"},
+      "description": "查看games目录"
+    }
+  ]
+}
+</task_plan>
+\`\`\`
+
+**组合搜索**：
+\`\`\`
+<task_plan>
+{
+  "intent": "获取Sony PlayStation最新消息和发布会时间",
+  "feasibility": "需要中英文两个维度搜索PlayStation相关消息",
+  "steps": [
+    {
+      "id": "step-1",
+      "tool": "web_search",
+      "params": {"query": "PlayStation 最新消息 发布会", "count": "5", "language": "zh-CN"},
+      "description": "中文搜索PlayStation最新消息"
+    },
+    {
+      "id": "step-2",
+      "tool": "web_search",
+      "params": {"query": "Sony PlayStation State of Play 2026", "count": "5", "language": "en-US"},
+      "description": "英文搜索PlayStation发布会信息"
+    }
+  ]
+}
+</task_plan>
+\`\`\``);
+
+  // ═══════════════════════════════════════════════════════════
+  // Agent 模式专用：场景判断 + 搜索关键词指南
+  // ═══════════════════════════════════════════════════════════
     parts.push(`## 场景判断指引
 
 ### 🔍 什么时候应该调用联网搜索模组？
@@ -406,17 +668,41 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
 - 用户明确要求不要联网
 - **用户询问 Unicoda 自身功能**（界面按钮、面板、设置项等）——这些信息已在本提示词的知识库章节中提供，直接回答即可，不要联网搜索
 
-### 📂 什么时候应该调用文件读取模组？
+### 📂 search_file vs read_from_files 选择规则
 
-当用户问题涉及**本地文件系统**时，调用 \`read_from_files\` 模组：
-- 用户询问"当前在什么路径"、"当前目录是什么" → 使用 \`pwd\` 动作
-- 用户说"进入/切换到某个文件夹" → 使用 \`cd\` 动作并指定路径
-- 用户问"这个目录下有什么"、"看看XX文件夹"、"列出文件" → 使用 \`list_dir\` 动作
-- 用户说"帮我打开/读取/查看某个文件" → 使用 \`read_file\` 动作
-- 用户问"这个文件/路径的信息" → 使用 \`get_info\` 动作
+当用户问题涉及**本地文件系统**时，根据用户意图选择：**如果用户要找具体文件/游戏/安装包，先用 \`search_file\`（支持通配符，快）；如果用户想看目录结构，用 \`read_from_files\`**。
 
-> **示例场景**：用户说"当前目录有什么文件？" → 先用 \`pwd\` 确认当前路径，再用 \`list_dir\` 列出文件。
-> 如果用户明确指定了路径（如"看看我的桌面"、"读取 C 盘下的 config.json"），可以跳过 \`pwd\` 直接传入 \`path\`。
+| 用户意图 | 优先使用 | 说明 |
+|----------|----------|------|
+| "帮我找找XX游戏/文件在哪"、"找不到XX"、"XX放哪了" | **\`search_file\`** | 用 glob 通配符按文件名搜索 |
+| "看看这个目录下有什么"、"列出文件"、"进入文件夹" | **\`read_from_files list_dir/cd\`** | 浏览目录结构 |
+| "帮我打开/读取/查看某个文件" | **\`read_from_files read_file\`** | 读取文件内容 |
+| 不确定文件在哪、不知道具体目录 | **先 \`search_file\`** | 用多个 pattern 并行搜索，比如同时 "*游戏名*"、"*sanoba*"、"*Witch*" |
+
+**\`search_file\` 使用要点：**
+- pattern 支持 glob 通配符：\`*\` 匹配任意字符，\`?\` 匹配单个字符
+- **如果搜索结果为空，换用不同拼写/大小写再搜一次**（比如没搜到 "SanobaWitch" 就试试 "*Witch*" 或 "*sanoba*"）
+- **多个不同粒度的 pattern 可以并行搜索**，在同一轮回复中输出多个 \`<tool_call>\` 块
+- 默认不区分大小写，设为 \`caseSensitive: "true"\` 可启用区分
+
+> **示例**：用户说"帮我找找SanobaWitch游戏在哪" → 并行调用：\`search_file(pattern="*Sanoba*", path="G:\\")\`、\`search_file(pattern="*Witch*", path="G:\\")\`，比用 \`read_from_files\` 逐个目录遍历快得多。
+
+### 🚫 绝对不要做的事
+
+1. **当用户问的是本地文件/目录相关的问题时，绝对不要联网搜索（web_search）**。
+   - 本地文件的路径、游戏安装位置、项目目录结构——这些东西无法通过互联网搜索得到
+   - 例如，用户问"我的RiddleJoker游戏在哪"、"帮我看看桌面有什么"——这是本地文件操作，调用 web_search 毫无意义
+   - **规则**：如果问题明确涉及用户本地硬盘上的文件/目录/游戏/项目，请使用 search_file（找具体文件）或 read_from_files（看目录结构），不要先尝试 web_search
+
+2. **绝对不要 dump 整个盘符根目录（如 list_dir("G:\\"）或 list_dir("C:\\"）**。
+   - 如果用户说"在G盘"，你应该根据用户描述推断最可能的几个子目录（如 SteamLibrary、games、Download 等），只查看这些目录
+   - 除非用户明确说"列出G盘根目录的所有内容"，否则不要查看盘符根级别
+   - 这条规则没有例外
+
+3. **list_dir 的输出必须归纳总结后呈现给用户**，不要直接 dump 原始数据。
+   - ❌ "G:\\ 共有 206 个条目：$RECYCLE.BIN、123pan、5e、5EDemocache、7zip、..."
+   - ✅ "G 盘根目录下，与游戏相关的有这几个目录：games（46 个游戏）、SteamLibrary（Steam 游戏库）"
+   - 只列出关键类别/文件夹名和数量即可
 
 ### 💡 最佳实践
 
@@ -483,7 +769,7 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
   // ═══════════════════════════════════════════════════════════
   // 预装填知识库（所有模式均注入）
   // ═══════════════════════════════════════════════════════════
-  const kbSection = buildKnowledgeSection(kbMode);
+  const kbSection = buildKnowledgeSection(kbMode, preferredLanguage);
   if (kbSection) parts.push(kbSection);
 
   // ═══════════════════════════════════════════════════════════
@@ -491,6 +777,25 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
   // ═══════════════════════════════════════════════════════════
   if (customPrompt) {
     parts.push(`## 附加指令\n\n${customPrompt}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 末尾语言提醒（简短强化，完整指令已在开头给出）
+  // ═══════════════════════════════════════════════════════════
+  if (preferredLanguage) {
+    const langReminder: Record<string, string> = {
+      "zh-CN": "【重申】你必须使用汉语（中文）。",
+      "en-US": "【REMINDER】You must output in English (en-US).",
+      "en-GB": "【REMINDER】You must output in British English (en-GB) following the spelling, vocabulary, and date conventions listed above.",
+      "en-AU": "【REMINDER】You must output in Australian English (en-AU) following the distinctive vocabulary, spellings, and tones listed above.",
+      "en-IN": "【REMINDER】You must output in Indian English (en-IN) following the specific vocabulary and grammar conventions listed above.",
+      "de-DE": "【WIEDERHOLUNG】Sie müssen auf Deutsch antworten.",
+      "ja-JP": "【再確認】日本語で出力する必要があります。",
+      "fr-FR": "【RAPPEL】Vous devez répondre en français.",
+      "es-ES": "【RECORDATORIO】Debe responder en español.",
+    };
+    const reminder = langReminder[preferredLanguage];
+    if (reminder) parts.push(reminder);
   }
 
   return parts.join("\n\n");
@@ -526,6 +831,7 @@ export function parseToolCalls(text: string): ToolCall[] {
 /**
  * 从文本中移除 <tool_call> 块（完整或部分标签），返回干净的回复内容。
  * 流式传输期间会收到不完整的标签（如 `<tool_c`），也需要移除。
+ * 同时移除 <task_plan> 块。
  */
 export function stripToolCalls(text: string): string {
   // 先移除完整的 <tool_call>...</tool_call> 块
@@ -535,7 +841,87 @@ export function stripToolCalls(text: string): string {
   if (partialIdx !== -1) {
     result = result.substring(0, partialIdx).trim();
   }
+  // 移除 <task_plan> 块（完整或部分）
+  result = result.replace(/<task_plan>[\s\S]*?<\/task_plan>/g, "").trim();
+  const planPartialIdx = result.indexOf("<task_plan");
+  if (planPartialIdx !== -1) {
+    result = result.substring(0, planPartialIdx).trim();
+  }
   return result;
+}
+
+// ─── 任务计划系统 Prompt ───────────────────────────────
+
+/**
+ * 构建任务计划系统提示词。
+ * 与完整系统提示词不同，planner 的 ONLY 职责是输出 <task_plan> 块。
+ * 不包含语言指令、身份认知、示例对话等非必要内容。
+ */
+export function buildPlannerSystemPrompt(
+  mode: Mode,
+  panelMode?: PanelMode,
+): string {
+  const relevantMods = getModulesForMode(getAllModules(), mode, panelMode);
+  const parts: string[] = [];
+
+  parts.push(`# Unicoda 任务计划生成器
+
+你正在 Unicoda 的任务计划生成器中运行。你的**唯一职责**是分析用户问题，输出一个完整的执行计划。
+
+## 输出格式限制
+
+**你只能输出一个 <task_plan> XML 块。** 不得包含任何其他文本、解释、问候语或分析。
+
+\`\`\`
+<task_plan>
+{
+  "intent": "用一句话描述用户的目标，直接引用用户原话",
+  "feasibility": "分析需要哪些工具、可能的挑战和假设",
+  "steps": [
+    {
+      "id": "step-1",
+      "tool": "模块ID",
+      "params": { "参数名": "参数值" },
+      "description": "本步骤的目的说明"
+    }
+  ]
+}
+</task_plan>
+\`\`\`
+
+## 严格规则
+
+1. **输出必须以 <task_plan> 开头，以 </task_plan> 结尾**。中间是 JSON 格式的计划。
+2. **不得输出任何 <task_plan> 之外的文本**——不要问候、不要解释、不要额外句子。
+3. **intent 字段必须直接引用用户原话或准确概括用户核心需求**。
+4. **steps 数组中的每个步骤必须有唯一的 id 和 tool 字段**，params 和 description 可选但强烈推荐。
+5. **如果用户的问题很简单（不需要任何工具调用），输出 steps: [] 的空计划**。
+6. **步骤之间要考虑依赖关系**——如果步骤 B 需要步骤 A 的结果，确保 A 排在 B 前面。
+7. **如果是文件查找任务（找具体游戏/文件/安装包），优先使用 search_file**（支持通配符模式如 "*游戏名*"），不要用 web_search。
+8. **不要 dump 盘符根目录**，优先查看具体子目录。
+
+## 可用工具\n\n`);
+
+  const toolDocs = relevantMods.map((mod) => {
+    return [
+      `### ${mod.name}（\`${mod.id}\`）`,
+      ``,
+      `${mod.description}${formatModuleParamsDoc(mod.parameters)}`,
+    ].join("\n");
+  });
+  parts.push(toolDocs.join("\n\n---\n\n"));
+
+  parts.push(`## 制定计划前必读
+
+1. 仔细阅读用户的**最新一条消息**，确认用户真正要做什么。
+2. 分析用户问题涉及的场景：是文件查找、信息搜索、代码分析，还是简单对话？
+3. 如果涉及文件操作：找具体文件/游戏/安装包优先用 **search_file**；看目录结构用 **read_from_files**。
+4. 如果涉及查询外部信息，优先使用 web_search。
+5. **如果用户问的是本地文件/目录相关问题，不要在计划中使用 web_search**——本地文件信息无法通过网络搜索得到。
+6. **对于简单聊天、通用知识问答等不需要工具的场景，输出 steps: [] 的空计划**。
+7. **如果用户问题只需要一个简单的工具调用（如查天气、搜新闻），创建一个包含单一步骤的计划**`);
+
+  return parts.join("\n");
 }
 
 // ─── Tool Call 执行 ───────────────────────────────────

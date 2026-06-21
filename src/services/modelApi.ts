@@ -56,6 +56,18 @@ export async function* streamChatCompletion(
   }
   chatMessages.push(...messages);
 
+  // 调试：检查发送给 API 的系统消息
+  const sysMsg = chatMessages.find((m) => m.role === "system");
+  if (sysMsg) {
+    const hasLang = sysMsg.content.includes("【严格语言指令") || sysMsg.content.includes("【STRICT LANGUAGE RULE") || sysMsg.content.includes("【STRENGE SPRACHREGEL") || sysMsg.content.includes("【厳格な言語ルール") || sysMsg.content.includes("【RÈGLE LINGUISTIQUE STRICTE") || sysMsg.content.includes("【REGLA DE IDIOMA ESTRICTA");
+    console.log(`[modelApi] System msg length: ${sysMsg.content.length}, contains language rule: ${hasLang}`);
+    if (!hasLang) {
+      console.warn("[modelApi] ⚠️ System message does NOT contain any language instruction!");
+    }
+  } else {
+    console.warn("[modelApi] ⚠️ No system message found in API request!");
+  }
+
   const url = `${normalizeUrl(baseUrl)}chat/completions`;
 
   const body: Record<string, unknown> = {
@@ -140,14 +152,12 @@ export async function* streamChatCompletion(
   const decoder = new TextDecoder();
   let buffer = "";
 
-  let streamAborted = false;
   while (true) {
     let chunk: { done: boolean; value?: Uint8Array };
     try {
       chunk = await reader.read();
     } catch {
       // 流式读取中断（网络断开等），立即停止读取
-      streamAborted = true;
       break;
     }
     if (chunk.done) break;

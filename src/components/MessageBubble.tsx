@@ -153,7 +153,6 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
     "Bad gateway": "网关错误",
     "Service unavailable": "服务暂不可用",
     "Gateway timeout": "网关超时",
-    "网络连接失败": "网络连接失败 - 请检查网络连接和 API 代理设置",
   };
   const errorBodyZh = apiErrorMatch ? (ERROR_MESSAGE_ZH[apiErrorMatch[2]] || apiErrorMatch[2]) : "";
 
@@ -345,7 +344,91 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
             userSelect: "text",
           }}
         >
-          {isTool ? (
+          {message.isTaskPlan && message.taskPlan ? (
+            <div
+              style={{
+                borderRadius: "8px",
+                border: yolo ? "1px solid rgba(99,102,241,0.3)" : "1px solid #6366f1",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 12px",
+                  userSelect: "none",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  color: yolo ? "rgba(129,140,248,0.9)" : "#818cf8",
+                  background: yolo ? "rgba(99,102,241,0.06)" : "var(--c-bg3)",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <line x1="3" y1="9" x2="21" y2="9" />
+                  <line x1="9" y1="21" x2="9" y2="9" />
+                </svg>
+                <span>📋 任务计划</span>
+              </div>
+              <div
+                style={{
+                  padding: "12px",
+                  fontSize: "13px",
+                  lineHeight: 1.7,
+                  color: yolo ? "rgba(255,255,255,0.7)" : "var(--c-t2)",
+                  background: yolo ? "rgba(255,255,255,0.02)" : "var(--c-bg)",
+                  borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid var(--c-bd)",
+                  userSelect: "text",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {message.taskPlan.steps.length > 0 ? (
+                  <>
+                    <div style={{ marginBottom: "8px" }}>
+                      <span style={{ fontWeight: 600 }}>🎯 目标：</span>
+                      {message.taskPlan.intent}
+                    </div>
+                    <div style={{ marginBottom: "10px", opacity: 0.8, fontSize: "12px" }}>
+                      <span style={{ fontWeight: 600 }}>💡 分析：</span>
+                      {message.taskPlan.feasibility}
+                    </div>
+                    <div style={{ marginBottom: "6px" }}>
+                      <span style={{ fontWeight: 600 }}>📋 执行步骤：</span>
+                    </div>
+                    {message.taskPlan.steps.map((s, i) => (
+                      <div key={s.id} style={{ display: "flex", alignItems: "flex-start", gap: "6px", marginBottom: "4px", padding: "2px 0" }}>
+                        <span style={{ flexShrink: 0, fontSize: "11px", lineHeight: "22px" }}>⏳</span>
+                        <span style={{ lineHeight: 1.6 }}>
+                          <strong>步骤 {i + 1}</strong>：{s.description}
+                          <span style={{ opacity: 0.6, fontSize: "11px", marginLeft: "4px" }}>（{s.tool}）</span>
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div style={{ opacity: 0.7 }}>无需工具调用，直接回复。</div>
+                )}
+                {message.content && (
+                  <div
+                    style={{
+                      marginTop: "10px",
+                      paddingTop: "10px",
+                      borderTop: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid var(--c-bd)",
+                      fontSize: "12px",
+                      lineHeight: 1.6,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {message.content}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : isTool ? (
             <div
               style={{
                 borderRadius: "8px",
@@ -490,7 +573,6 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                   <span style={{ fontSize: "12px", fontWeight: 700, color: "#ef4444" }}>
                     {(() => {
                       const status = parseInt(apiErrorMatch[1], 10);
-                      if (status === 0) return "网络连接失败";
                       if (status === 402) return "API 请求被拒绝";
                       if (status === 401) return "API 密钥无效";
                       if (status === 429) return "请求频率过高";

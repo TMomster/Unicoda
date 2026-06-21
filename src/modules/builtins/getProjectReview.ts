@@ -153,7 +153,7 @@ const mod: Module = {
       return;
     }
 
-    const maxDepth = Math.max(0, parseInt(params.maxDepth || "3", 10) || 3);
+    const maxDepth = Math.min(8, Math.max(0, parseInt(params.maxDepth || "3", 10) || 3));
     const fileCount = { total: 0 };
     const dirCount = { total: 0 };
     const typeMap = new Map<string, number>();

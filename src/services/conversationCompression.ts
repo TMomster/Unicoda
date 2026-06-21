@@ -2,7 +2,7 @@
  * 对话历史压缩服务
  *
  * 将早期对话压缩为 AI 生成的摘要，保留关键上下文的同时大幅减少 token 消耗。
- * 压缩后的摘要以 `[对话历史摘要]` 标识的系统消息替换旧消息，
+ * 压缩后的摘要以 `[Conversation History Summary]` 标识的系统消息替换旧消息，
  * 最近 N 轮对话完整保留。
  */
 
@@ -53,9 +53,9 @@ export async function compressConversation(
     {
       role: "system",
       content:
-        "请用中文将以下对话内容压缩为一段精炼的摘要（200字以内），" +
-        "保留所有关键信息：用户的需求、已给出的方案/代码、做出的决策。\n" +
-        "只输出摘要文本，不要添加任何前缀或说明。",
+        "Compress the following conversation into a concise summary (200 words or less), " +
+        "preserving all key information: user's requirements, solutions/code provided, and decisions made.\n" +
+        "Output only the summary text, without any prefixes or explanations.",
     },
     ...oldMessages.map((m) => ({ role: m.role, content: m.content })),
   ];
@@ -83,7 +83,7 @@ export async function compressConversation(
   const summaryMessage: Message = {
     id: `compressed-${Date.now()}`,
     role: "assistant",
-    content: `[对话历史摘要]\n${trimmed}`,
+    content: `[Conversation History Summary]\n${trimmed}`,
     timestamp: Date.now(),
   };
 
@@ -93,7 +93,9 @@ export async function compressConversation(
   };
 }
 
+const SUMMARY_PREFIXES = ["[对话历史摘要]", "[Conversation History Summary]"];
+
 /** 检查消息列表中是否已有压缩摘要 */
 export function hasCompressionSummary(messages: Message[]): boolean {
-  return messages.some((m) => m.content.startsWith("[对话历史摘要]"));
+  return messages.some((m) => SUMMARY_PREFIXES.some((p) => m.content.startsWith(p)));
 }

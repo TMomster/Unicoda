@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useModels } from "../contexts/ModelContext";
+import { t as rawT } from "../i18n";
 import type { FileAttachment, Message, Mode } from "../types";
 import { fileToAttachment } from "../utils/fileParser";
 import { hasCompressionSummary, MIN_MESSAGES_FOR_COMPRESSION } from "../services/conversationCompression";
@@ -148,6 +149,8 @@ interface Props {
   onModeChange: (mode: Mode) => void;
   /** Yolo 玻璃模式样式 */
   yolo?: boolean;
+  /** 偏好语言（用于输入框占位文本，与界面语言解耦） */
+  preferredLanguage?: string;
   /** Tauri 原生拖拽传入的待发送文件（框架级别） */
   pendingFiles?: FileAttachment[];
   onRemovePendingFile?: (id: string) => void;
@@ -211,7 +214,7 @@ function FileChip({ file, yolo, onRemove }: { file: FileAttachment; yolo?: boole
   );
 }
 
-export default function InputBar({ onSend, onStop, disabled, messages, memoryMessages, maxTokens, compressionEnabled, onToggleCompression, onCompressNow, isCompressing, mode, onModeChange, yolo, pendingFiles, onRemovePendingFile, onClearPendingFiles, dragOver: dragOverProp }: Props) {
+export default function InputBar({ onSend, onStop, disabled, messages, memoryMessages, maxTokens, compressionEnabled, onToggleCompression, onCompressNow, isCompressing, mode, onModeChange, yolo, preferredLanguage, pendingFiles, onRemovePendingFile, onClearPendingFiles, dragOver: dragOverProp }: Props) {
   const { t } = useTheme();
   const { models, selectedModelId, setSelectedModelId } = useModels();
   const [text, setText] = useState("");
@@ -560,7 +563,11 @@ export default function InputBar({ onSend, onStop, disabled, messages, memoryMes
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? t("generating") : t("inputPlaceholder")}
+            placeholder={disabled ? t("generating") : (() => {
+              if (!preferredLanguage) return t("inputPlaceholder");
+              const raw = rawT(preferredLanguage, "inputPlaceholder");
+              return raw === "inputPlaceholder" ? t("inputPlaceholder") : raw;
+            })()}
             rows={1}
             className={`input-area${yolo ? " yolo-input-area" : ""}`}
             disabled={disabled}

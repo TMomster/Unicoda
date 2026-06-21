@@ -22,21 +22,26 @@ export function getAllModules(): Module[] {
 }
 
 /** 初始化所有内置模组 */
+function safeImport(path: string): void {
+  import(/* @vite-ignore */ path).catch((e) => console.warn(`[Modules] 模组加载失败: ${path}`, e));
+}
+
 export function initBuiltinModules(): void {
   // 各模组的注册函数会在模块顶层调用 registerModule
-  import("./builtins/getCurrentTime");
-  import("./builtins/webSearch");
-  import("./builtins/fetchPage");
-  import("./builtins/summaryPage");
-  import("./builtins/readFromFiles");
-  import("./builtins/writeToFile");
-  import("./builtins/executeCommand");
-  import("./builtins/runCodeSandbox");
-  import("./builtins/searchInProject");
-  import("./builtins/getProjectReview");
-  import("./builtins/checkApiBalance");
-  import("./builtins/lintCode");
-  import("./builtins/getUnicodaStatus");
-  import("./builtins/getWorkspaceInfo");
-  import("./builtins/editFile");
+  safeImport("./builtins/getCurrentTime");
+  safeImport("./builtins/webSearch");
+  safeImport("./builtins/fetchPage");
+  safeImport("./builtins/summaryPage");
+  safeImport("./builtins/readFromFiles");
+  safeImport("./builtins/writeToFile");
+  safeImport("./builtins/executeCommand");
+  safeImport("./builtins/runCodeSandbox");
+  safeImport("./builtins/searchInProject");
+  safeImport("./builtins/searchFile");
+  safeImport("./builtins/getProjectReview");
+  safeImport("./builtins/checkApiBalance");
+  safeImport("./builtins/lintCode");
+  safeImport("./builtins/getUnicodaStatus");
+  safeImport("./builtins/getWorkspaceInfo");
+  safeImport("./builtins/editFile");
 }

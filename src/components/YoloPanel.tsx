@@ -1,20 +1,15 @@
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useState, useRef, useEffect, useCallback } from "react";
 import ConfirmDialog from "./ConfirmDialog";
 import type { Conversation, Message, Mode, FileAttachment } from "../types";
 import { useTheme } from "../contexts/ThemeContext";
 import { useModels } from "../contexts/ModelContext";
-import { streamChatCompletion } from "../services/modelApi";
-import { buildAgentSystemPrompt, parseToolCalls, stripToolCalls, executeToolCall } from "../services/agentEngine";
-import { compressConversation, MIN_MESSAGES_FOR_COMPRESSION, hasCompressionSummary } from "../services/conversationCompression";
+import { useChatStream, setNextMsgId } from "../hooks/useChatStream";
+import { hasCompressionSummary } from "../services/conversationCompression";
 import {
   loadMetadata, loadLiteralMessages, loadMemoryMessages,
   flushConversationData, deleteConversationFiles, migrateFromOldFormat, toMeta,
   type ConversationMeta,
 } from "../services/conversationStorage";
-import { playNotificationSound } from "../utils/notificationSound";
 import { updateUnicodaStatus } from "../modules/builtins/getUnicodaStatus";
 import { updateWorkspacePath } from "../modules/builtins/getWorkspaceInfo";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -28,27 +23,15 @@ import FilePreviewPanel from "./FilePreviewPanel";
 import PrintDialog from "./PrintDialog";
 
 let nextConvId = 1;
-let nextMsgId = 1;
 
 function makeConvTitle(existing: Conversation[], locale: string): string {
-  const prefix = locale === "en-US" ? "New Session" : "新会话";
-  const pattern = locale === "en-US" ? /^New Session-(\d+)$/ : /^新会话-(\d+)$/;
+  const prefix = locale === "zh-CN" ? "新会话" : locale === "de-DE" ? "Neue Sitzung" : "New Session";
+  const pattern = locale === "zh-CN" ? /^新会话-(\d+)$/ : locale === "de-DE" ? /^Neue Sitzung-(\d+)$/ : /^New Session-(\d+)$/;
   const nums = new Set<number>();
   for (const c of existing) { const m = c.title.match(pattern); if (m) nums.add(parseInt(m[1], 10)); }
   let n = 1;
   while (nums.has(n)) n++;
   return `${prefix}-${n}`;
-}
-
-/** 将全部会话数据写入文件（防抖） */
-let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
-function flushConversations(convs: Conversation[], path: string) {
-  if (pendingFlushTimer) clearTimeout(pendingFlushTimer);
-  pendingFlushTimer = setTimeout(async () => {
-    await flushConversationData(convs, "yolo", path);
-    const metas = convs.map(toMeta);
-    try { localStorage.setItem("unicoda-yolo-conversations-meta", JSON.stringify(metas)); } catch { /* ignore */ }
-  }, 100);
 }
 
 // ── Workspace Drawer (glass consistent) ──────
@@ -76,14 +59,14 @@ function WorkspaceDrawer({ open, onClose, onSelectFolder, workspacePath }: {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(100,180,255,0.7)" strokeWidth="1.8">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
               </svg>
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "#c0c0c0", letterSpacing: "0.3px" }}>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.92)", letterSpacing: "0.3px" }}>
                 {t("yoloWorkspace")}
               </span>
             </div>
             <button onClick={onClose}
-              style={{ width: "26px", height: "26px", borderRadius: "6px", border: "none", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+              style={{ width: "26px", height: "26px", borderRadius: "6px", border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.92)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
             </button>
           </div>
@@ -92,12 +75,12 @@ function WorkspaceDrawer({ open, onClose, onSelectFolder, workspacePath }: {
             padding: "12px 16px", borderRadius: "8px",
             backgroundColor: "rgba(255,255,255,0.04)",
             border: "1px solid rgba(255,255,255,0.06)",
-            fontSize: "12px", color: "#8a8a8e", lineHeight: 1.8,
+            fontSize: "12px", color: "rgba(255,255,255,0.72)", lineHeight: 1.8,
           }}>
             {workspacePath ? (
-              <span style={{ wordBreak: "break-all", color: "#a0a0a0" }}>{workspacePath}</span>
+              <span style={{ wordBreak: "break-all", color: "rgba(255,255,255,0.82)" }}>{workspacePath}</span>
             ) : (
-              <span style={{ color: "#5a5a5e", fontStyle: "italic" }}>{t("yoloNoWorkspace")}</span>
+              <span style={{ color: "rgba(255,255,255,0.5)", fontStyle: "italic" }}>{t("yoloNoWorkspace")}</span>
             )}
           </div>
 
@@ -119,7 +102,7 @@ function WorkspaceDrawer({ open, onClose, onSelectFolder, workspacePath }: {
             </button>
           </div>
 
-          <div style={{ marginTop: "10px", fontSize: "11px", color: "rgba(255,255,255,0.25)", lineHeight: 1.6, textAlign: "center" }}>
+          <div style={{ marginTop: "10px", fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.6, textAlign: "center" }}>
             {t("yoloWorkspaceDesc")}
           </div>
         </div>
@@ -195,11 +178,11 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
           padding: "0 12px", borderBottom: "1px solid rgba(255,255,255,0.06)",
           userSelect: "none",
         }}>
-          <span style={{ fontSize: "12px", fontWeight: 600, color: "#b0b0b8", letterSpacing: "0.3px" }}>{t("sessions")}</span>
+          <span style={{ fontSize: "12px", fontWeight: 600, color: "rgba(255,255,255,0.88)", letterSpacing: "0.3px" }}>{t("sessions")}</span>
           <button onClick={onClose}
-            style={{ width: "24px", height: "24px", borderRadius: "6px", border: "none", background: "transparent", color: "#6a6a6e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
-            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+            style={{ width: "24px", height: "24px", borderRadius: "6px", border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.92)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
@@ -232,13 +215,13 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
               setLastClickedId(null);
             }
           }}
-            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#8a8a8e", cursor: "pointer", fontSize: "11px", transition: "all 0.15s", fontFamily: "inherit", whiteSpace: "nowrap" }}
+            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "rgba(255,255,255,0.72)", cursor: "pointer", fontSize: "11px", transition: "all 0.15s", fontFamily: "inherit", whiteSpace: "nowrap" }}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.05)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}>
             {selectedIds.size === sorted.length ? t("batchDeselectAll") : t("batchSelectAll")}
           </button>
           {selectedIds.size > 0 && (
-            <span style={{ fontSize: "11px", color: "#6a6a6e", flex: 1, textAlign: "right" }}>
+            <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)", flex: 1, textAlign: "right" }}>
               {t("batchSelected").replace("{0}", String(selectedIds.size))}
             </span>
           )}
@@ -289,7 +272,7 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
                     padding: "8px 10px", borderRadius: "6px", cursor: "pointer",
                     marginBottom: "2px",
                     backgroundColor: isSelected ? "rgba(37,99,235,0.18)" : isActive ? "rgba(37,99,235,0.10)" : "transparent",
-                    color: isActive ? "#d0d0d8" : "#a0a0a8",
+                    color: isActive ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.82)",
                     fontSize: "12px", lineHeight: 1.6, fontFamily: "inherit",
                     transition: "background 0.12s",
                   }}
@@ -317,13 +300,13 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
                       onClick={(e) => e.stopPropagation()}
                       style={{
                         flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
-                        borderRadius: "4px", color: "#d0d0d8", fontSize: "12px", padding: "2px 6px",
+                        borderRadius: "4px", color: "rgba(255,255,255,0.95)", fontSize: "12px", padding: "2px 6px",
                         outline: "none", fontFamily: "inherit",
                       }} />
                   ) : (
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: isSelected || isActive ? "#d0d0d8" : "#a0a0a8" }}>{conv.title}</span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: isSelected || isActive ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.82)" }}>{conv.title}</span>
                   )}
-                  <span style={{ fontSize: "10px", color: "#5a5a5e", flexShrink: 0 }}>{conv.messages.length}</span>
+                  <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.5)", flexShrink: 0 }}>{conv.messages.length}</span>
                 </div>
                 {/* Right-click context menu */}
                 {contextMenuId === conv.id && (
@@ -335,13 +318,13 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
                     minWidth: "120px",
                   }} onClick={(e) => e.stopPropagation()}>
                     <div onClick={() => { startRename(conv); setContextMenuId(null); }}
-                      style={{ padding: "7px 10px", borderRadius: "6px", fontSize: "12px", color: "#c0c0c0", cursor: "pointer", transition: "background 0.12s" }}
+                      style={{ padding: "7px 10px", borderRadius: "6px", fontSize: "12px", color: "rgba(255,255,255,0.92)", cursor: "pointer", transition: "background 0.12s" }}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
                       {t("contextRename")}
                     </div>
                     <div onClick={() => { onTogglePin(conv.id); setContextMenuId(null); }}
-                      style={{ padding: "7px 10px", borderRadius: "6px", fontSize: "12px", color: "#c0c0c0", cursor: "pointer", transition: "background 0.12s" }}
+                      style={{ padding: "7px 10px", borderRadius: "6px", fontSize: "12px", color: "rgba(255,255,255,0.92)", cursor: "pointer", transition: "background 0.12s" }}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
                       {conv.pinned ? t("contextUnpin") : t("contextPin")}
@@ -368,7 +351,7 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
               onBatchTogglePin(Array.from(selectedIds), !allPinned);
               setSelectedIds(new Set());
             }}
-              style={{ flex: 1, padding: "8px 0", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "#a0a0a8", cursor: "pointer", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
+              style={{ flex: 1, padding: "8px 0", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "rgba(255,255,255,0.82)", cursor: "pointer", fontSize: "12px", transition: "all 0.15s", fontFamily: "inherit" }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.05)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}>
               {sorted.filter((c) => selectedIds.has(c.id)).every((c) => c.pinned) ? t("batchUnpin") : t("batchPin")}
@@ -425,12 +408,12 @@ function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenS
 
   const btnBase: React.CSSProperties = {
     width: "28px", height: "28px", borderRadius: "7px", border: "none",
-    background: "transparent", color: "#6a6a6e", cursor: "pointer",
+    background: "transparent", color: "rgba(255,255,255,0.6)", cursor: "pointer",
     display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s",
   };
   const winBtn: React.CSSProperties = {
     width: "46px", height: "36px", border: "none",
-    background: "transparent", color: "#8a8a8e", cursor: "pointer",
+    background: "transparent", color: "rgba(255,255,255,0.72)", cursor: "pointer",
     display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.12s",
   };
 
@@ -446,41 +429,41 @@ function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenS
       {/* ── Left: back | workspace | session | settings ── */}
       <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
         <button onClick={onBack} title="返回默认面板" style={btnBase}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.92)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
         </button>
         <div style={{ width: "1px", height: "16px", backgroundColor: "rgba(255,255,255,0.06)" }} />
         <button onClick={onToggleWorkspace} title="工作区" style={btnBase}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.92)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
         </button>
         <button onClick={onToggleSession}
           style={{
             ...btnBase, width: "auto", height: "28px", padding: "0 8px", gap: "5px",
-            fontSize: "12px", fontWeight: 500, color: "#b0b0b8", letterSpacing: "0.3px",
+            fontSize: "12px", fontWeight: 500, color: "rgba(255,255,255,0.88)", letterSpacing: "0.3px",
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#d0d0d8"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#b0b0b8"; }}>
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.95)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.88)"; }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
           <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
         </button>
         <button onClick={onOpenSettings} title="设置" style={btnBase}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.92)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
         </button>
         <button onClick={onOpenComponents} title="组件" style={btnBase}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.92)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
           </svg>
         </button>
         <button onClick={onPrint} title="打印" style={btnBase}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#c0c0c0"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#6a6a6e"; }}>
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.92)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" />
           </svg>
@@ -503,7 +486,7 @@ function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenS
         <button onClick={handleClose} style={{ ...winBtn, marginRight: 0 }}
           title="关闭"
           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#e81123"; e.currentTarget.style.color = "#fff"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#8a8a8e"; }}>
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}>
           <CloseIcon />
         </button>
       </div>
@@ -512,7 +495,7 @@ function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenS
 }
 
 // ── Welcome screen (enhanced) ────────────────
-function YoloWelcome() {
+function YoloWelcome({ subtitle }: { subtitle: string }) {
   const { t } = useTheme();
   const [visible, setVisible] = useState(false);
   useEffect(() => { const t = setTimeout(() => setVisible(true), 80); return () => clearTimeout(t); }, []);
@@ -531,18 +514,18 @@ function YoloWelcome() {
         borderRadius: "1px",
       }} />
       <div style={{
-        fontSize: "40px", fontWeight: 200, color: "rgba(255,255,255,0.75)",
+        fontSize: "40px", fontWeight: 200, color: "rgba(255,255,255,0.95)",
         letterSpacing: "4px",
-        textShadow: "0 0 60px rgba(150,200,255,0.25), 0 0 120px rgba(100,150,255,0.1)",
+        textShadow: "0 0 60px rgba(150,200,255,0.35), 0 0 120px rgba(100,150,255,0.15)",
       }}>
         {t("yoloWelcome")}
       </div>
       <p style={{
-        fontSize: "13px", color: "rgba(255,255,255,0.3)",
+        fontSize: "13px", color: "rgba(255,255,255,0.7)",
         textAlign: "center", maxWidth: "340px", lineHeight: 1.8,
         letterSpacing: "0.5px",
       }}>
-        {t("whatToDo")}
+        {subtitle}
       </p>
       <div style={{
         width: "40px", height: "1px",
@@ -557,7 +540,7 @@ function YoloWelcome() {
 interface Props { onBack?: () => void; }
 
 export default function YoloPanel({ onBack }: Props) {
-  const { fontFamily, t, locale, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode } = useTheme();
+  const { fontFamily, t, locale, preferredLanguage, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode } = useTheme();
   const { models, selectedModelId } = useModels();
   const selectedModel = models.find((m) => m.id === selectedModelId);
 
@@ -597,37 +580,34 @@ export default function YoloPanel({ onBack }: Props) {
     return [{ id: String(nextConvId++), title: makeConvTitle([], locale), messages: [], memoryMessages: [], pinned: false, createdAt: Date.now(), updatedAt: Date.now() }];
   });
 
-  const [activeId, setActiveId] = useState<string>(conversations[0].id);
+  const [activeId, setActiveId] = useState<string>("");
 
   const initialLoadDone = useRef(false);
   const loadedConvIds = useRef(new Set<string>());
   useEffect(() => {
     if (initialLoadDone.current) return;
+    if (!sessionPath) return; // sessionPath 尚未就绪，等待下次触发
     initialLoadDone.current = true;
 
     (async () => {
       // 1. 迁移旧格式
-      if (sessionPath) {
-        await migrateFromOldFormat("unicoda-yolo-conversations", "yolo", sessionPath);
-      }
+      await migrateFromOldFormat("unicoda-yolo-conversations", "yolo", sessionPath);
 
       // 2. 加载元数据
-      if (sessionPath) {
-        const freshMetas = await loadMetadata("yolo", sessionPath);
-        if (freshMetas.length > 0) {
-          const loaded: Conversation[] = freshMetas.map((m) => ({
-            ...m,
-            messages: [],
-            memoryMessages: [],
-          }));
-          for (const c of loaded) {
-            const idNum = parseInt(c.id, 10);
-            if (idNum >= nextConvId) nextConvId = idNum + 1;
-          }
-          setConversations(loaded);
-          try { localStorage.setItem("unicoda-yolo-conversations-meta", JSON.stringify(freshMetas)); } catch { /* ignore */ }
-          return;
+      const freshMetas = await loadMetadata("yolo", sessionPath);
+      if (freshMetas.length > 0) {
+        const loaded: Conversation[] = freshMetas.map((m) => ({
+          ...m,
+          messages: [],
+          memoryMessages: [],
+        }));
+        for (const c of loaded) {
+          const idNum = parseInt(c.id, 10);
+          if (idNum >= nextConvId) nextConvId = idNum + 1;
         }
+        setConversations(loaded);
+        try { localStorage.setItem("unicoda-yolo-conversations-meta", JSON.stringify(freshMetas)); } catch { /* ignore */ }
+        return;
       }
 
       // 3. 兜底：尝试旧格式（兼容从未迁移的数据）
@@ -642,14 +622,10 @@ export default function YoloPanel({ onBack }: Props) {
             for (const c of loaded) {
               const idNum = parseInt(c.id, 10);
               if (idNum >= nextConvId) nextConvId = idNum + 1;
-              for (const msg of c.messages) {
-                const mId = parseInt(msg.id, 10);
-                if (mId >= nextMsgId) nextMsgId = mId + 1;
-              }
-              for (const msg of (c.memoryMessages ?? [])) {
-                const mId = parseInt(msg.id, 10);
-                if (mId >= nextMsgId) nextMsgId = mId + 1;
-              }
+              // 同步消息 ID 到 hook 模块级变量
+              const allMsgs = [...c.messages, ...(c.memoryMessages ?? [])];
+              const maxId = allMsgs.length > 0 ? Math.max(...allMsgs.map(m => parseInt(m.id, 10))) : 0;
+              setNextMsgId(maxId);
             }
           }
         } catch { /* ignore */ }
@@ -679,15 +655,10 @@ export default function YoloPanel({ onBack }: Props) {
         );
         // 初始化 nextMsgId，避免新消息 ID 与已加载消息冲突
         const msgsToScan = literalMsgs ?? [];
-        for (const msg of msgsToScan) {
-          const mId = parseInt(msg.id, 10);
-          if (mId >= nextMsgId) nextMsgId = mId + 1;
-        }
         const memMsgsToScan = memoryMsgs ?? [];
-        for (const msg of memMsgsToScan) {
-          const mId = parseInt(msg.id, 10);
-          if (mId >= nextMsgId) nextMsgId = mId + 1;
-        }
+        const allIds = [...msgsToScan, ...memMsgsToScan].map(m => parseInt(m.id, 10));
+        const maxId = allIds.length > 0 ? Math.max(...allIds) : 0;
+        setNextMsgId(maxId);
       }
     })();
   }, [sessionPath, activeId]);
@@ -742,11 +713,11 @@ export default function YoloPanel({ onBack }: Props) {
           updatedAt: Date.now(),
         };
         flushConversations([fresh], sessionPathRef.current);
-        setActiveId(fresh.id);
+        setActiveId("");
         return [fresh];
       }
       flushConversations(next, sessionPathRef.current);
-      if (activeId === id) setActiveId(next[0].id);
+      if (activeId === id) setActiveId("");
       return next;
     });
   }, [activeId, locale]);
@@ -784,11 +755,11 @@ export default function YoloPanel({ onBack }: Props) {
           updatedAt: Date.now(),
         };
         flushConversations([fresh], sessionPathRef.current);
-        setActiveId(fresh.id);
+        setActiveId("");
         return [fresh];
       }
       flushConversations(next, sessionPathRef.current);
-      if (ids.includes(activeId)) setActiveId(next[0].id);
+      if (ids.includes(activeId)) setActiveId("");
       return next;
     });
   }, [activeId, locale]);
@@ -815,9 +786,6 @@ export default function YoloPanel({ onBack }: Props) {
     updateWorkspacePath(activeConv?.workspacePath || "");
   }, [activeConv?.workspacePath]);
 
-  const [isStreaming, setIsStreaming] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const streamingMsgIdRef = useRef<string | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -826,67 +794,52 @@ export default function YoloPanel({ onBack }: Props) {
   const [componentsAnim, setComponentsAnim] = useState<"enter" | "exit">("enter");
   const [previewFile, setPreviewFile] = useState<FileAttachment | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
-  const [compressionEnabled, setCompressionEnabled] = useState(false);
-  const [isCompressing, setIsCompressing] = useState(false);
 
-  // ── Drag-and-drop file upload (Tauri native) ───────
-  const [dragOver, setDragOver] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<FileAttachment[]>([]);
-  const isStreamingRef = useRef(isStreaming);
-  useEffect(() => {
-    isStreamingRef.current = isStreaming;
+  /** 防抖落盘：同时保存元数据和当前活跃会话的消息体 */
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushConversations = useCallback(
+    (convs: Conversation[], path: string) => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = setTimeout(async () => {
+        flushTimerRef.current = null;
+        const activeConv = convs.find((c) => c.id === activeId) ?? null;
+        const metas = convs.map(toMeta);
+        await flushConversationData(activeConv, metas, "yolo", path);
+        try { localStorage.setItem("unicoda-yolo-conversations-meta", JSON.stringify(metas)); } catch { /* ignore */ }
+      }, 100);
+    },
+    [activeId],
+  );
+
+  // ── Chat stream hook ──────────────────────────────
+  const chatStream = useChatStream({
+    updateConv,
+    conversations,
+    conversationsRef,
+    setConversations,
+    selectedModel,
+    mode,
+    preferredLanguage,
+    developerMode,
+    panelMode: "Yolo",
+    workspacePath: activeConv?.workspacePath || undefined,
+    workMode: "yolo",
+    sessionPath: sessionPathRef.current,
+    locale,
+    flushConvs: flushConversations,
+    withMsgUpdate,
   });
 
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
-        const p = event.payload;
-        if (p.type === "enter" || p.type === "over") {
-          setDragOver(true);
-        } else if (p.type === "leave") {
-          setDragOver(false);
-        } else if (p.type === "drop") {
-          setDragOver(false);
-          if (isStreamingRef.current) return;
-          interface FileContent { data: string; mime_type: string; is_image: boolean; size: number; name: string; }
-          const allowed: FileAttachment[] = [];
-          for (const filePath of p.paths) {
-            try {
-              const content: FileContent = await invoke("read_file_content", { path: filePath });
-              if (content.is_image) continue;
-              if (content.size > 10 * 1024 * 1024) continue;
-              allowed.push({
-                id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                name: content.name,
-                size: content.size,
-                mimeType: content.mime_type,
-                data: content.data,
-                isImage: content.is_image,
-              });
-            } catch { /* skip failed reads */ }
-          }
-          if (allowed.length > 0) {
-            setPendingFiles((prev) => [...prev, ...allowed]);
-          }
-        }
-      });
-    })();
-    return () => { if (unlisten) unlisten(); };
-  }, []);
+  const handleSendWrapper = useCallback(
+    (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
+      chatStream.handleSend(text, activeId, sendMode, files);
+    },
+    [chatStream.handleSend, activeId],
+  );
 
-  const handleRemovePendingFile = useCallback((fileId: string) => {
-    setPendingFiles((prev) => prev.filter((f) => f.id !== fileId));
-  }, []);
-
-  // ── 请求系统通知权限 ──
-  useEffect(() => {
-    (async () => {
-      if (!(await isPermissionGranted())) {
-        await requestPermission();
-      }
-    })();
-  }, []);
+  const handleCompressNowWrapper = useCallback(() => {
+    chatStream.handleCompressNow(activeId);
+  }, [chatStream.handleCompressNow, activeId]);
 
   // ── Ctrl+P Print Dialog ──
   useEffect(() => {
@@ -931,285 +884,6 @@ export default function YoloPanel({ onBack }: Props) {
     if (!activeConv) return;
     setPrintOpen(true);
   }, [activeConv]);
-
-  const handleToggleCompression = useCallback(() => {
-    setCompressionEnabled((v) => !v);
-  }, []);
-
-  const handleCompressNow = useCallback(async () => {
-    if (!activeConv || !selectedModel || isCompressing) return;
-    const targetMsgs = activeConv.memoryMessages ?? activeConv.messages;
-    if (targetMsgs.length < MIN_MESSAGES_FOR_COMPRESSION) return;
-    setIsCompressing(true);
-    try {
-      const result = await compressConversation(
-        targetMsgs,
-        selectedModel,
-      );
-      if (result.summary) {
-        updateConv(activeId!, (c) => ({
-          ...c,
-          memoryMessages: result.messages,
-          updatedAt: Date.now(),
-        }));
-      }
-    } catch {
-      // silent
-    } finally {
-      setIsCompressing(false);
-    }
-  }, [activeConv, activeId, selectedModel, updateConv, isCompressing]);
-
-  function buildApiMessages(prev: Message[], userMsg: Message, sendMode: Mode): { role: string; content: string }[] {
-    const result: { role: string; content: string }[] = [];
-    const wsPath = activeConv?.workspacePath || undefined;
-    const sp = sendMode === "Agent"
-      ? buildAgentSystemPrompt("Agent", selectedModel?.systemPrompt, wsPath, "yolo", "Yolo")
-      : buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt, wsPath, "yolo", "Yolo");
-    const kbExtra = prev.find((m) => m.role === "assistant" && m.content.startsWith("[对话历史摘要]"));
-    result.push({ role: "system", content: sp + (kbExtra ? `\n\n## 前期对话摘要\n\n${kbExtra.content}` : "") });
-    for (const m of prev) {
-      if (m.content.startsWith("[对话历史摘要]")) continue;
-      if (m.role === "tool") {
-        result.push({ role: "user" as const, content: `[工具执行结果 - ${m.toolCallId || "unknown"}]\n${m.toolCallError ? `执行错误：${m.toolCallError}` : m.content}` });
-      } else {
-        result.push({ role: m.role, content: m.content });
-      }
-    }
-    // 合并文件内容到用户消息
-    let finalContent = userMsg.content;
-    if (userMsg.files && userMsg.files.length > 0) {
-      const fileBlocks = userMsg.files.map((f) => `[文件: ${f.name}]\n${f.data}`);
-      finalContent = fileBlocks.join("\n\n") + (finalContent ? "\n\n" + finalContent : "");
-    }
-    result.push({ role: userMsg.role, content: finalContent });
-    return result;
-  }
-
-  async function handleChatSend(userMsg: Message, prevMessages: Message[], currentMode: Mode, ac: AbortController, aid: string) {
-    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
-    updateConv(aid, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
-    let allToolResults: { role: string; content: string }[] = [];
-    let complete = false, toolCallRound = 0;
-    const MAX_ROUNDS = 5;
-    while (!complete) {
-      const asstId = String(nextMsgId++);
-      streamingMsgIdRef.current = asstId;
-      updateConv(aid, (c) => withMsgUpdate(c, (msgs) => [...msgs, { id: asstId, role: "assistant", content: "", timestamp: Date.now(), streaming: true } as Message]));
-      let fullContent = "", fullReasoning = "";
-      let reasoningEnded = false;
-      try {
-        for await (const chunk of streamChatCompletion(selectedModel!, [...initialApiMessages, ...allToolResults], ac.signal)) {
-          fullContent += chunk.content; fullReasoning += chunk.reasoningContent;
-          if (!reasoningEnded && fullReasoning && chunk.content) reasoningEnded = true;
-          const dc = stripToolCalls(fullContent);
-          const htc = fullContent.includes("<tool_call");
-          updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: dc, toolCallInProgress: htc, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) } : m)));
-        }
-      } catch (streamErr) {
-        // 流式失败时，如果已有工具结果则视为完成（避免空白的错误消息覆盖工具结果）
-        // 但不再吞掉错误，而是将实际错误展示出来
-        if (allToolResults.length > 0) {
-          const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
-          // 保持 [API_ERROR:*] 格式以触发红色错误面板，否则展示为纯文本
-          const displayContent = errMsg.startsWith("[API_ERROR:")
-            ? errMsg
-            : `**（上下文续传中断，工具结果已获取）**\n\n**实际错误:** ${errMsg}`;
-          updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: displayContent, streaming: false } : m)));
-          complete = true;
-          continue;
-        }
-        throw streamErr; // 没有工具结果时，让外层 catch 处理
-      }
-      updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, streaming: false } : m)));
-      const toolCalls = parseToolCalls(fullContent);
-      if (toolCalls.length === 0) {
-        complete = true;
-        const cc = stripToolCalls(fullContent);
-        if (cc !== fullContent) updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: cc, toolCallInProgress: false } : m)));
-      } else if (toolCallRound < MAX_ROUNDS) {
-        toolCallRound++;
-        const cc = stripToolCalls(fullContent);
-        updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: cc !== fullContent ? cc : m.content, toolCallInProgress: true } : m)));
-        // 将 assistant 的 tool call 消息加入上下文，让模型知道这是它自己的调用结果
-        allToolResults.push({ role: "assistant", content: fullContent });
-        // 工具开始执行，移除"正在发起工具调用"占位
-        updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, toolCallInProgress: false } : m)));
-        for (const call of toolCalls) {
-          const result = await executeToolCall(call, ac.signal, selectedModel);
-          updateConv(aid, (c) => withMsgUpdate(c, (msgs) => [...msgs, { id: String(nextMsgId++), role: "tool", content: result.content, toolCallId: call.id, toolCallError: result.error, timestamp: Date.now() } as Message]));
-          allToolResults.push({ role: "user", content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}` });
-          if (toolCalls.length > 1) await new Promise((r) => setTimeout(r, 500));
-        }
-        // 工具执行完后短暂等待再发起续传，给后端时间释放资源
-        await new Promise((r) => setTimeout(r, 200));
-      } else { complete = true; const cc = stripToolCalls(fullContent); if (cc) updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: cc } : m))); }
-    }
-  }
-
-  async function handleAgentSend(userMsg: Message, prevMessages: Message[], currentMode: Mode, ac: AbortController, aid: string) {
-    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
-    updateConv(aid, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
-    let allToolResults: { role: string; content: string }[] = [];
-    let complete = false, toolRound = 0;
-    const MAX_ROUNDS = 5;
-    while (!complete && toolRound < MAX_ROUNDS) {
-      const asstId = String(nextMsgId++);
-      streamingMsgIdRef.current = asstId;
-      updateConv(aid, (c) => withMsgUpdate(c, (msgs) => [...msgs, { id: asstId, role: "assistant", content: "", timestamp: Date.now(), streaming: true } as Message]));
-      let fullContent = "", fullReasoning = "";
-      let reasoningEnded = false;
-      try {
-        for await (const chunk of streamChatCompletion(selectedModel!, [...initialApiMessages, ...allToolResults], ac.signal)) {
-          fullContent += chunk.content; fullReasoning += chunk.reasoningContent;
-          if (!reasoningEnded && fullReasoning && chunk.content) reasoningEnded = true;
-          const dc = stripToolCalls(fullContent);
-          const htc = fullContent.includes("<tool_call");
-          updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: dc, toolCallInProgress: htc, reasoningContent: fullReasoning, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) } : m)));
-        }
-      } catch (streamErr) {
-        if (allToolResults.length > 0) {
-          const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
-          const displayContent = errMsg.startsWith("[API_ERROR:")
-            ? errMsg
-            : `**（上下文续传中断，工具结果已获取）**\n\n**实际错误:** ${errMsg}`;
-          updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: displayContent, streaming: false } : m)));
-          complete = true;
-          continue;
-        }
-        throw streamErr;
-      }
-      updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, streaming: false } : m)));
-      toolRound++;
-      const toolCalls = parseToolCalls(fullContent);
-      if (toolCalls.length === 0) {
-        complete = true;
-        const cc = stripToolCalls(fullContent);
-        if (cc !== fullContent) updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: cc, toolCallInProgress: false } : m)));
-      } else {
-        const cc = stripToolCalls(fullContent);
-        updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, content: cc !== fullContent ? cc : m.content, toolCallInProgress: true } : m)));
-        // 将 assistant 的 tool call 消息加入上下文
-        allToolResults.push({ role: "assistant", content: fullContent });
-        // 工具开始执行，移除"正在发起工具调用"占位
-        updateConv(aid, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === asstId ? { ...m, toolCallInProgress: false } : m)));
-        for (const call of toolCalls) {
-          const result = await executeToolCall(call, ac.signal, selectedModel);
-          updateConv(aid, (c) => withMsgUpdate(c, (msgs) => [...msgs, { id: String(nextMsgId++), role: "tool", content: result.content, toolCallId: call.id, toolCallError: result.error, timestamp: Date.now() } as Message]));
-          allToolResults.push({ role: "user", content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}` });
-          if (toolCalls.length > 1) await new Promise((r) => setTimeout(r, 500));
-        }
-        // 工具执行完后短暂等待再发起续传，给后端时间释放资源
-        await new Promise((r) => setTimeout(r, 200));
-      }
-    }
-  }
-
-  // ── 自动标题生成 ─────────────────────────────────
-  async function generateConversationTitle(
-    model: import("../types").ModelConfig,
-    userContent: string,
-    assistantContent: string,
-    convId: string,
-  ) {
-    const titlePrompt = [
-      '根据以下对话内容，用3-6个字生成本次对话的简洁标题（不要使用引号或多余文字，仅返回标题本身）：',
-      '',
-      '用户：' + userContent.slice(0, 500),
-      '助手：' + assistantContent.slice(0, 500),
-    ].join('\n');
-    const messages = [{ role: 'user' as const, content: titlePrompt }];
-    try {
-      let fullTitle = '';
-      for await (const chunk of streamChatCompletion(model, messages)) {
-        fullTitle += chunk.content;
-      }
-      const trimmed = fullTitle.replace(/[""""']/g, '').trim();
-      if (trimmed) {
-        updateConv(convId, (c) => ({
-          ...c,
-          title: trimmed.length > 30 ? trimmed.slice(0, 30) + '...' : trimmed,
-          autoTitleDone: true,
-          updatedAt: Date.now(),
-        }));
-      } else {
-        updateConv(convId, (c) => ({ ...c, autoTitleDone: true, updatedAt: Date.now() }));
-      }
-    } catch {
-      updateConv(convId, (c) => ({ ...c, autoTitleDone: true, updatedAt: Date.now() }));
-    }
-    // 持久化到文件（setTimeout 0 等待 state 更新后再读 ref）
-    setTimeout(() => {
-      const convs = conversationsRef.current;
-      flushConversations(convs, sessionPathRef.current);
-    }, 0);
-  }
-
-  const handleSend = useCallback(async (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
-    if (!activeId || !selectedModel) return;
-    const currentMode = sendMode ?? mode;
-    if (abortRef.current) abortRef.current.abort();
-    const userMsg: Message = { id: String(nextMsgId++), role: "user", content: text, timestamp: Date.now(), files };
-    const currentConv = conversations.find((c) => c.id === activeId);
-    const prevMessages = currentConv?.memoryMessages ?? currentConv?.messages ?? [];
-
-    // 判断是否需要自动标题：全新会话（无消息）且未标记过
-    const needsAutoTitle = currentConv
-      && currentConv.messages.length === 0
-      && !currentConv.autoTitleDone;
-
-    setIsStreaming(true);
-    const ac = new AbortController();
-    abortRef.current = ac;
-    try {
-      if (currentMode === "Agent") await handleAgentSend(userMsg, prevMessages, currentMode, ac, activeId);
-      else await handleChatSend(userMsg, prevMessages, currentMode, ac, activeId);
-    } catch (err: unknown) {
-      const lastStreaming = streamingMsgIdRef.current;
-      if (lastStreaming) {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === lastStreaming ? { ...m, streaming: false } : m)));
-        } else {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          const displayContent = errorMsg.startsWith("[API_ERROR:")
-            ? errorMsg
-            : `**Error:** ${errorMsg}`;
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => msgs.map((m) => m.id === lastStreaming ? { ...m, content: displayContent, streaming: false } : m)));
-        }
-      }
-    } finally {
-      const completedNormally = !ac.signal.aborted;
-      setIsStreaming(false);
-      streamingMsgIdRef.current = null;
-      abortRef.current = null;
-      setTimeout(() => {
-        const convs = conversationsRef.current;
-        flushConversations(convs, sessionPathRef.current);
-      }, 0);
-
-      // 会话完成后发送系统通知（屏幕右下角）
-      if (completedNormally) {
-        playNotificationSound();
-        sendNotification({ title: "会话任务已完成。", body: "" });
-      }
-
-      // 流式完成后，如需自动标题则调用模型生成
-      if (needsAutoTitle && selectedModel) {
-        setTimeout(() => {
-          const conv = conversationsRef.current.find((c) => c.id === activeId);
-          if (conv) {
-            const assistantMsgs = conv.messages.filter((m) => m.role === 'assistant');
-            const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
-            if (lastAssistant && lastAssistant.content) {
-              generateConversationTitle(selectedModel, text, lastAssistant.content, activeId);
-            }
-          }
-        }, 0);
-      }
-    }
-  }, [activeId, selectedModel, conversations, updateConv, mode]);
-
-  const handleStop = useCallback(() => { if (abortRef.current) abortRef.current.abort(); }, []);
 
   const handleSelectFolder = useCallback(async () => {
     try {
@@ -1279,13 +953,15 @@ export default function YoloPanel({ onBack }: Props) {
                 animation: "yolo-content-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both",
               }}>
                 {activeConv && activeConv.messages.length > 0 ? (
-                  <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} isStreaming={isStreaming} />
+                  <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} isStreaming={chatStream.isStreaming} />
+                ) : !activeConv ? (
+                  <YoloWelcome subtitle={t("whatToDo")} />
                 ) : (
-                  <YoloWelcome />
+                  <YoloWelcome subtitle={t("startNewChat")} />
                 )}
               </div>
               {activeConv && (
-                <InputBar onSend={handleSend} onStop={handleStop} disabled={isStreaming} messages={activeConv.messages} memoryMessages={activeConv.memoryMessages ?? activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={compressionEnabled} onToggleCompression={handleToggleCompression} onCompressNow={handleCompressNow} isCompressing={isCompressing} mode={mode} onModeChange={setMode} yolo pendingFiles={pendingFiles} onRemovePendingFile={handleRemovePendingFile} onClearPendingFiles={() => setPendingFiles([])} dragOver={dragOver} />
+                <InputBar onSend={handleSendWrapper} onStop={chatStream.handleStop} disabled={chatStream.isStreaming} messages={activeConv.messages} memoryMessages={activeConv.memoryMessages ?? activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={chatStream.compressionEnabled} onToggleCompression={chatStream.handleToggleCompression} onCompressNow={handleCompressNowWrapper} isCompressing={chatStream.isCompressing} mode={mode} onModeChange={setMode} yolo preferredLanguage={preferredLanguage} pendingFiles={chatStream.pendingFiles} onRemovePendingFile={chatStream.handleRemovePendingFile} onClearPendingFiles={chatStream.clearPendingFiles} dragOver={chatStream.dragOver} />
               )}
             </div>
           </div>

@@ -50,6 +50,7 @@ async function summarizeWithLLM(
   modelName: string,
   baseUrl: string,
   provider: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const effectiveBaseUrl = baseUrl || (provider === "Deepseek"
     ? "https://api.deepseek.com/v1/"
@@ -93,6 +94,7 @@ async function summarizeWithLLM(
       Authorization: `Bearer ${apiKey}`,
     },
     body,
+    signal,
   });
 
   if (!response.ok) {
@@ -161,7 +163,7 @@ const mod: Module = {
 
       // 第二步：调用 LLM 生成摘要
       yield `正在分析并生成摘要...\n`;
-      const summary = await summarizeWithLLM(text, url, apiKey, modelName, baseUrl, provider);
+      const summary = await summarizeWithLLM(text, url, apiKey, modelName, baseUrl, provider, _signal);
 
       yield `📝 页面摘要：${url}\n\n${summary}`;
     } catch (err) {
