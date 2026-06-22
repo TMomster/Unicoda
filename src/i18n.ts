@@ -182,6 +182,7 @@ const zh: Record<string, string> = {
   browse: "浏览",
   currentSessionPath: "当前路径",
   sessionPathNotSet: "未配置",
+  sessionPathDefault: "默认路径",
   sessionPathUnavailable: "路径不可用",
   // User
   clickToEdit: "点击编辑",
@@ -220,8 +221,8 @@ const zh: Record<string, string> = {
   componentsTabModules: "模组",
   componentsTabKnowledge: "知识库",
   noModules: "暂无可用模组",
-  moduleLevel_low: "低敏感",
-  moduleLevel_high: "高敏感",
+  moduleLevel_normal: "普通",
+  moduleLevel_sensitive: "敏感",
   moduleAvailableIn: "可用模式",
   // Knowledge Base
   knowledgeBase: "知识库",
@@ -469,6 +470,7 @@ const en: Record<string, string> = {
   browse: "Browse",
   currentSessionPath: "Current path",
   sessionPathNotSet: "Not configured",
+  sessionPathDefault: "Default path",
   sessionPathUnavailable: "Unavailable",
   // User
   clickToEdit: "Click to edit",
@@ -507,8 +509,8 @@ const en: Record<string, string> = {
   componentsTabModules: "Modules",
   componentsTabKnowledge: "Knowledge Base",
   noModules: "No modules available",
-  moduleLevel_low: "Low",
-  moduleLevel_high: "High",
+  moduleLevel_normal: "Normal",
+  moduleLevel_sensitive: "Sensitive",
   moduleAvailableIn: "Available in",
   // Knowledge Base
   knowledgeBase: "Knowledge Base",
@@ -759,6 +761,7 @@ const de: Record<string, string> = {
   browse: "Durchsuchen",
   currentSessionPath: "Aktueller Pfad",
   sessionPathNotSet: "Nicht konfiguriert",
+  sessionPathDefault: "Standardpfad",
   sessionPathUnavailable: "Nicht verfügbar",
   // User
   clickToEdit: "Klicken zum Bearbeiten",
@@ -797,8 +800,8 @@ const de: Record<string, string> = {
   componentsTabModules: "Module",
   componentsTabKnowledge: "Wissensdatenbank",
   noModules: "Keine Module verfügbar",
-  moduleLevel_low: "Niedrig",
-  moduleLevel_high: "Hoch",
+  moduleLevel_normal: "Normal",
+  moduleLevel_sensitive: "Sensitiv",
   moduleAvailableIn: "Verfügbar in",
   // Knowledge Base
   knowledgeBase: "Wissensdatenbank",

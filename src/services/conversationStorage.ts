@@ -18,7 +18,7 @@
  */
 
 import type { Conversation, Message } from "../types";
-import { writeConfigFile, readConfigFile } from "../utils/configStorage";
+import { writeConfigFile, readConfigFile, resolveDefaultSessionDir } from "../utils/configStorage";
 
 // ── 文件名常量 ──────────────────────────────────────────────
 
@@ -128,15 +128,15 @@ export async function deleteConversationFiles(
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<void> {
-  if (!sessionPath) return;
+  const actualPath = sessionPath || await resolveDefaultSessionDir();
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("remove_file_at_path", {
-      dir: sessionPath,
+      dir: actualPath,
       filename: `${literalPath(convId, mode)}.json`,
     });
     await invoke("remove_file_at_path", {
-      dir: sessionPath,
+      dir: actualPath,
       filename: `${memoryPath(convId, mode)}.json`,
     });
   } catch {
@@ -188,7 +188,8 @@ export async function migrateFromOldFormat(
   mode: "normal" | "yolo",
   sessionPath: string,
 ): Promise<boolean> {
-  if (!sessionPath) return false;
+  const actualPath = sessionPath || await resolveDefaultSessionDir();
+  if (!actualPath) return false;
   try {
     const raw = localStorage.getItem(oldKey);
     if (!raw) return false;
@@ -196,25 +197,25 @@ export async function migrateFromOldFormat(
     if (oldConvs.length === 0) return false;
 
     // 检查是否已迁移（文件已存在）
-    const existingMetas = await loadMetadata(mode, sessionPath);
+    const existingMetas = await loadMetadata(mode, actualPath);
     if (existingMetas.length > 0) return false;
 
     const metas: ConversationMeta[] = [];
     for (const conv of oldConvs) {
       metas.push(toMeta(conv));
       // 字面量 = memory = 原 messages
-      await saveLiteralMessages(conv.id, conv.messages, mode, sessionPath);
-      await saveMemoryMessages(conv.id, conv.messages, mode, sessionPath);
+      await saveLiteralMessages(conv.id, conv.messages, mode, actualPath);
+      await saveMemoryMessages(conv.id, conv.messages, mode, actualPath);
     }
-    await saveMetadata(metas, mode, sessionPath);
+    await saveMetadata(metas, mode, actualPath);
 
     // 清理旧 localStorage 数据
     localStorage.removeItem(oldKey);
 
-    // 清理旧磁盘文件（旧格式是单文件 {sessionPath}/{oldKey}.json）
+    // 清理旧磁盘文件（旧格式是单文件 {actualPath}/{oldKey}.json）
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("remove_file_at_path", { dir: sessionPath, filename: `${oldKey}.json` });
+      await invoke("remove_file_at_path", { dir: actualPath, filename: `${oldKey}.json` });
     } catch { /* 忽略删除失败 */ }
 
     return true;

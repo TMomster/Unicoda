@@ -7,15 +7,38 @@
  * - 配置文件（theme/lock/conversations）：写入加密文件（DPAPI，仅 Windows）
  * - API Key：存入 Windows Credential Manager（仅 Windows）
  * - sessionPath 文件：不加密（用于会话库等非敏感内容）
+ *
+ * sessionPath 参数约定：
+ *   - undefined（不传）→ 使用加密的默认 configs 目录（供 ThemeContext 设置使用）
+ *   - ""（空字符串）→ 使用用户目录下的 UnicodaSessions（新默认值）
+ *   - "自定义路径" → 使用指定的自定义路径
  */
 
 import { invoke } from "@tauri-apps/api/core";
+
+// ── 默认会话路径缓存 ───────────────────────────────────────────
+
+let defaultSessionDirPromise: Promise<string> | null = null;
+
+/**
+ * 解析用户目录下的默认会话存储路径（{homeDir}/UnicodaSessions）。
+ * 结果会缓存，只调用一次 Rust IPC。
+ */
+export async function resolveDefaultSessionDir(): Promise<string> {
+  if (!defaultSessionDirPromise) {
+    defaultSessionDirPromise = invoke<string>("get_default_session_dir");
+  }
+  return defaultSessionDirPromise;
+}
 
 /**
  * 将数据异步写入 JSON 文件。
  * @param key 文件名键（自动拼接 .json）
  * @param data 要写入的数据
- * @param sessionPath 可选的自定义存储目录；为空则使用默认 configs 目录
+ * @param sessionPath 可选的自定义存储目录
+ *   - undefined：使用加密的默认 configs 目录（ThemeContext 设置使用）
+ *   - ""：使用用户目录下的 UnicodaSessions
+ *   - "自定义路径"：使用指定的路径
  */
 export async function writeConfigFile<T>(
   key: string,
@@ -28,17 +51,18 @@ export async function writeConfigFile<T>(
     localStorage.setItem(key, json);
   } catch { /* ignore */ }
 
-  if (sessionPath) {
-    // 写入自定义路径（不加密）
+  if (sessionPath !== undefined) {
+    // sessionPath 已传入（可能为空字符串或自定义路径）→ 不加密
+    const actualPath = sessionPath || await resolveDefaultSessionDir();
     try {
       await invoke("save_file_at_path", {
-        dir: sessionPath,
+        dir: actualPath,
         filename: `${key}.json`,
         data: json,
       });
     } catch { /* ignore */ }
   } else {
-    // 写入默认 configs 目录（加密）
+    // undefined → 写入加密的默认 configs 目录
     try {
       await invoke("save_config", { filename: `${key}.json`, data: json });
     } catch { /* ignore */ }
@@ -50,23 +74,27 @@ export async function writeConfigFile<T>(
  * @param key 文件名键（自动拼接 .json）
  * @param fallback 文件不存在时的默认值
  * @param sessionPath 可选的自定义存储目录
+ *   - undefined：使用加密的默认 configs 目录
+ *   - ""：使用用户目录下的 UnicodaSessions
+ *   - "自定义路径"：使用指定的路径
  */
 export async function readConfigFile<T>(
   key: string,
   fallback: T,
   sessionPath?: string,
 ): Promise<T> {
-  if (sessionPath) {
-    // 从自定义路径读取（不加密）
+  if (sessionPath !== undefined) {
+    // sessionPath 已传入 → 从指定路径读取（不加密）
+    const actualPath = sessionPath || await resolveDefaultSessionDir();
     try {
       const raw: string = await invoke("load_file_from_path", {
-        dir: sessionPath,
+        dir: actualPath,
         filename: `${key}.json`,
       });
       return JSON.parse(raw) as T;
     } catch { /* 文件不存在，fallback 到 localStorage */ }
   } else {
-    // 从默认 configs 目录读取（加密）
+    // undefined → 从加密的默认 configs 目录读取
     try {
       const raw: string = await invoke("load_config", {
         filename: `${key}.json`,
@@ -83,7 +111,7 @@ export async function readConfigFile<T>(
 }
 
 /**
- * 获取配置文件目录的绝对路径。
+ * 获取加密配置文件目录的绝对路径（供设置面板显示）。
  */
 export async function getConfigDir(): Promise<string | null> {
   try {

@@ -3,7 +3,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useModels } from "../contexts/ModelContext";
 import { useLock } from "../contexts/LockContext";
 import { useSearch } from "../contexts/SearchContext";
-import { getConfigDir } from "../utils/configStorage";
+import { getConfigDir, resolveDefaultSessionDir } from "../utils/configStorage";
 import { invoke } from "@tauri-apps/api/core";
 import AnimatedSection from "./AnimatedSection";
 import AuroraBackground from "./AuroraBackground";
@@ -142,7 +142,16 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
   // 解析路径为绝对路径
   const [absPath, setAbsPath] = useState("");
   useEffect(() => {
-    if (!sessionPath) { setAbsPath(""); return; }
+    if (!sessionPath) {
+      // 空路径 = 使用默认路径 ~/UnicodaSessions
+      resolveDefaultSessionDir().then((p) => {
+        setAbsPath(p);
+        import("@tauri-apps/api/path").then(({ resolve }) => {
+          resolve(p).then(setAbsPath).catch(() => setAbsPath(p));
+        }).catch(() => setAbsPath(p));
+      });
+      return;
+    }
     // Tauri resolve 可以将相对路径转为绝对路径
     import("@tauri-apps/api/path").then(({ resolve }) => {
       resolve(sessionPath).then(setAbsPath).catch(() => setAbsPath(sessionPath));
@@ -456,9 +465,9 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><polyline points="12 11 12 17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>
               </button>
             </div>
-            <div style={{ fontSize: "11px", marginTop: "8px", lineHeight: 1.6, wordBreak: "break-all", color: sessionPath ? C.t3 : "#ef4444" }}>
-              {t("currentSessionPath")}: {sessionPath ? (absPath || sessionPath) : <span style={{ color: "#ef4444" }}>{t("sessionPathNotSet")}</span>}
-              {sessionPath && absPath && absPath !== sessionPath && (
+            <div style={{ fontSize: "11px", marginTop: "8px", lineHeight: 1.6, wordBreak: "break-all", color: C.t3 }}>
+              {t("currentSessionPath")}: {sessionPath ? (absPath || sessionPath) : (absPath || t("sessionPathDefault"))}
+              {absPath && (
                 <span style={{ marginLeft: "6px", fontSize: "10px", color: "#22c55e" }}>✓</span>
               )}
             </div>

@@ -8,6 +8,7 @@ import { SearchProvider } from "./contexts/SearchContext";
 import { useChatStream, setNextMsgId } from "./hooks/useChatStream";
 import { readConfigFile, writeConfigFile } from "./utils/configStorage";
 import { initBuiltinModules } from "./modules/registry";
+import "./modules/moduleImports";
 import { updateUnicodaStatus } from "./modules/builtins/getUnicodaStatus";
 import {
   APP_VERSION,
@@ -104,7 +105,6 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const loadedConvIds = useRef(new Set<string>());
   useEffect(() => {
     if (initialLoadDone.current) return;
-    if (!sessionPath) return; // sessionPath 尚未就绪，等待下次触发
     initialLoadDone.current = true;
 
     (async () => {
@@ -135,7 +135,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
   // 3. 当前活跃会话的消息体按需加载（每个会话只加载一次）
   useEffect(() => {
-    if (!sessionPath || !activeId || loadedConvIds.current.has(activeId)) return;
+    if (!activeId || loadedConvIds.current.has(activeId)) return;
     // 标记该会话已加载避免重入
     const id = activeId;
     loadedConvIds.current.add(activeId);

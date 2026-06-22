@@ -432,9 +432,15 @@ fn save_config(app_handle: tauri::AppHandle, filename: String, data: String) -> 
     let config_dir = get_config_dir(&app_handle)?;
     std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
 
+    let file_path = config_dir.join(&filename);
+    // 创建文件所在子目录（如 normal/literals/）
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
     let encrypted = dpapi::encrypt(data.as_bytes())?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(&encrypted);
-    std::fs::write(config_dir.join(&filename), &encoded).map_err(|e| e.to_string())
+    std::fs::write(&file_path, &encoded).map_err(|e| e.to_string())
 }
 
 /// 从加密文件加载配置
@@ -460,6 +466,16 @@ fn load_config(app_handle: tauri::AppHandle, filename: String) -> Result<String,
 fn get_config_dir_path(app_handle: tauri::AppHandle) -> Result<String, String> {
     let config_dir = get_config_dir(&app_handle)?;
     Ok(config_dir.to_string_lossy().to_string())
+}
+
+/// 返回用户目录下的默认会话存储路径：{homeDir}/UnicodaSessions
+#[tauri::command]
+fn get_default_session_dir(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let home = app_handle
+        .path()
+        .home_dir()
+        .map_err(|e| e.to_string())?;
+    Ok(home.join("UnicodaSessions").to_string_lossy().to_string())
 }
 
 /// 保存文件到自定义目录（不加密）
@@ -1057,6 +1073,7 @@ pub fn run() {
             save_config,
             load_config,
             get_config_dir_path,
+            get_default_session_dir,
             save_file_at_path,
             write_text_file_at,
             load_file_from_path,

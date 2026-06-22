@@ -586,7 +586,6 @@ export default function YoloPanel({ onBack }: Props) {
   const loadedConvIds = useRef(new Set<string>());
   useEffect(() => {
     if (initialLoadDone.current) return;
-    if (!sessionPath) return; // sessionPath 尚未就绪，等待下次触发
     initialLoadDone.current = true;
 
     (async () => {
@@ -635,7 +634,7 @@ export default function YoloPanel({ onBack }: Props) {
 
   // 4. 当前活跃会话的消息体按需加载（每个会话只加载一次）
   useEffect(() => {
-    if (!sessionPath || !activeId || loadedConvIds.current.has(activeId)) return;
+    if (!activeId || loadedConvIds.current.has(activeId)) return;
     const id = activeId;
     loadedConvIds.current.add(activeId);
     (async () => {
