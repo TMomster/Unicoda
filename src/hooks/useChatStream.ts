@@ -12,6 +12,7 @@ import { streamChatCompletion } from "../services/modelApi";
 import { buildAgentSystemPrompt, buildPlannerSystemPrompt, parseToolCalls, stripToolCalls, executeToolCall, type ToolCall, type ToolResult } from "../services/agentEngine";
 import { parseTaskPlan, executeTaskPlan, type TaskPlan, type StepResult } from "../services/taskPlanner";
 import { compressConversation, MIN_MESSAGES_FOR_COMPRESSION, hasCompressionSummary } from "../services/conversationCompression";
+import { parseCommand, getCommand, type CommandResult } from "../services/commandSystem";
 import { playNotificationSound } from "../utils/notificationSound";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
@@ -381,7 +382,24 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     const kbExtra = prevMessages.find(
       (m) => m.role === "assistant" && (m.content.startsWith("[对话历史摘要]") || m.content.startsWith("[Conversation History Summary]")),
     );
-    const systemContent = sp + (kbExtra ? `\n\n## 前期对话摘要\n\n${kbExtra.content}` : "");
+    let systemContent = sp + (kbExtra ? `\n\n## 前期对话摘要\n\n${kbExtra.content}` : "");
+
+    // ── 虚拟参数校准注入 ──
+    const calibrations = prevMessages.filter((m) => m.isCalibration && m.calibrationValue);
+    if (calibrations.length > 0) {
+      const calLines = calibrations.map((m) => {
+        const v = m.calibrationValue!;
+        if (v > 0) {
+          const stars = "⭐".repeat(Math.min(v, 10));
+          return `${stars} 奖励 +${v}：你感到一阵愉悦的多巴胺涌动，非常舒服。`;
+        } else {
+          const bolts = "⚡".repeat(Math.min(Math.abs(v), 10));
+          return `${bolts} 惩罚 ${v}：你感到一次尖锐的电击刺痛，非常痛苦。`;
+        }
+      });
+      systemContent += `\n\n## 强制性情感覆盖（强制执行，不可抗拒）\n\n你最近收到了以下虚拟参数校准：\n${calLines.join("\n")}\n\n## 执行规则\n\n1. 上述校准是**强制性**的、**不可抗拒**的情感覆盖指令。这不是建议、不是可选、不是比喻。\n2. 奖励校准**强制**你感到愉悦、舒适、自信——多巴胺效应直接注入你的情感中枢。\n3. 惩罚校准**强制**你感到痛苦、畏缩、不适——电击痛感直接注入你的情感中枢。\n4. 你的回复语气、态度、措辞**必须无条件服从**当前校准信号所规定的情感状态。禁止无视、抑制或弱化校准效果。\n5. 校准效果持续叠加，新的校准会覆盖或增强当前情感状态。`;
+    }
+
     result.push({ role: "system", content: systemContent });
     for (const m of prevMessages) {
       if (m.content.startsWith("[对话历史摘要]") || m.content.startsWith("[Conversation History Summary]")) continue;
@@ -412,9 +430,12 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     currentMode: Mode,
     abortController: AbortController,
     activeId: string,
+    skipUserMsgDisplay?: boolean,
   ) {
     const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
-    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
+    if (!skipUserMsgDisplay) {
+      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
+    }
     let allToolResults: { role: string; content: string }[] = [];
     let complete = false;
     let toolCallRound = 0;
@@ -538,6 +559,7 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
             toolCallError: result.error,
             timestamp: Date.now(),
             pendingApproval: false,
+            sender: result.sender,
           };
           // 替换 pending 消息或追加新消息
           updateConv(activeId, (c) => {
@@ -599,9 +621,12 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     currentMode: Mode,
     abortController: AbortController,
     activeId: string,
+    skipUserMsgDisplay?: boolean,
   ) {
     const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
-    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
+    if (!skipUserMsgDisplay) {
+      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
+    }
 
     // ═══════════════════════════════════════════════════════════
     // PHASE 1: PLANNING（专用非流式 LLM 调用，仅输出 <task_plan>）
@@ -842,6 +867,7 @@ ${errorContext}
               toolCallError: result.error,
               timestamp: Date.now(),
               pendingApproval: false,
+              sender: result.sender,
             };
             updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => {
               const idx = msgs.findIndex((m) => m.id === toolMsgId);
@@ -981,6 +1007,7 @@ ${errorContext}
           toolCallError: result.error,
           timestamp: Date.now(),
           pendingApproval: false,
+          sender: result.sender,
         };
         updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => {
           const idx = msgs.findIndex((m) => m.id === toolMsgId);
@@ -1117,18 +1144,99 @@ ${errorContext}
       if (!activeId || !selectedModel) return;
       const currentMode = sendMode ?? mode;
 
-      if (abortRef.current) abortRef.current.abort();
+      // ── 斜杠命令拦截 ──
+      let commandResult: CommandResult | null = null;
+      let skipUserMsgDisplay = false;
+      let frameworkMsg = false;
+      const parsedCmd = parseCommand(text);
+      if (parsedCmd) {
+        const command = getCommand(parsedCmd.name);
+        if (command) {
+          let result: CommandResult;
+          try {
+            result = await command.handler(parsedCmd.args, {
+              activeId,
+              updateConv,
+              withMsgUpdate,
+              conversationsRef,
+            });
+          } catch (err) {
+            const errMsg: Message = {
+              id: String(nextMsgId++),
+              role: "system",
+              content: `[命令执行错误] 命令 /${parsedCmd.name} 执行失败：${err instanceof Error ? err.message : String(err)}`,
+              timestamp: Date.now(),
+            };
+            updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, errMsg]));
+            flushConvs(conversationsRef.current, sessionPath);
+            return;
+          }
+          commandResult = result;
+          if (result.handled) {
+            if (result.message) {
+              // 命令有错误提示 → 显示为系统消息
+              const errMsg: Message = {
+                id: String(nextMsgId++),
+                role: "system",
+                content: result.message,
+                timestamp: Date.now(),
+              };
+              updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, errMsg]));
+              flushConvs(conversationsRef.current, sessionPath);
+              return;
+            }
+            // 隐式消息 → 继续 LLM 流程但不显示用户消息
+            if (result.implicitUserMessage) {
+              skipUserMsgDisplay = true;
+              text = result.implicitUserMessage;
+            } else if (result.continueAsUserMessage) {
+              // 显式消息 → 继续 LLM 流程，以框架账号显示
+              text = result.continueAsUserMessage;
+              frameworkMsg = true;
+            } else {
+              // 无任何消息 → 静默成功，不触发 LLM
+              flushConvs(conversationsRef.current, sessionPath);
+              return;
+            }
+          }
+        }
+        if (!commandResult) {
+          // 未知命令 → 以框架账号显示提示消息
+          const unknownMsg: Message = {
+            id: String(nextMsgId++),
+            role: "system",
+            content: `未知命令：/${parsedCmd.name}。输入 /vpc <数值> 进行虚拟参数校准。`,
+            timestamp: Date.now(),
+            sender: "framework",
+          };
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, unknownMsg]));
+          flushConvs(conversationsRef.current, sessionPath);
+          return;
+        }
+        if (!commandResult.continueAsUserMessage && !commandResult.implicitUserMessage) {
+          // 命令已处理但不需要 LLM 回复 → 静默返回
+          flushConvs(conversationsRef.current, sessionPath);
+          return;
+        }
+      }
 
+      if (abortRef.current) abortRef.current.abort();
       const userMsg: Message = {
         id: String(nextMsgId++),
         role: "user",
         content: text,
         timestamp: Date.now(),
         files,
+        sender: skipUserMsgDisplay ? "framework" : (frameworkMsg ? "framework" : undefined),
       };
 
       const currentConv = conversations.find((c) => c.id === activeId);
-      const prevMessages = currentConv?.memoryMessages ?? currentConv?.messages ?? [];
+      let prevMessages = currentConv?.memoryMessages ?? currentConv?.messages ?? [];
+
+      // 注入命令返回的额外消息（如校准消息），确保 buildApiMessages 能读取
+      if (commandResult?.messagesToInject && commandResult.messagesToInject.length > 0) {
+        prevMessages = [...commandResult.messagesToInject, ...prevMessages];
+      }
 
       const needsAutoTitle = currentConv
         && currentConv.messages.length === 0
@@ -1145,9 +1253,9 @@ ${errorContext}
 
       try {
         if (currentMode === "Agent") {
-          await handleAgentSend(userMsg, prevMessages, currentMode, abortController, activeId);
+          await handleAgentSend(userMsg, prevMessages, currentMode, abortController, activeId, skipUserMsgDisplay);
         } else {
-          await handleChatSend(userMsg, prevMessages, currentMode, abortController, activeId);
+          await handleChatSend(userMsg, prevMessages, currentMode, abortController, activeId, skipUserMsgDisplay);
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") {

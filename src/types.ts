@@ -76,7 +76,13 @@ export interface Message {
   /** Security 审批结果 */
   securityApprovalResult?: PermissionRecord;
   /** API 返回的 token 消耗统计（仅 assistant 消息，流结束后设置） */
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number; prompt_tokens_details?: { cached_tokens?: number } };
+  /** 是否为虚拟参数校准消息（/vpc 命令） */
+  isCalibration?: boolean;
+  /** 校准值：正数为奖励，负数为惩罚 */
+  calibrationValue?: number;
+  /** 消息发送方标识，用于区分不同系统账号的消息 */
+  sender?: "user" | "assistant" | "framework" | "security";
 }
 
 export interface Conversation {
