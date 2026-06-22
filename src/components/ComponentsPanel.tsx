@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import type { Module } from "../modules/types";
-import type { KnowledgeEntry, KnowledgeMode } from "../services/knowledgeBase";
+import type { KnowledgeEntry, KnowledgeMode, RetrievalType } from "../services/knowledgeBase";
 import { getAllModules } from "../modules/registry";
 import {
   getAllKnowledgeEntries,
@@ -36,7 +36,7 @@ interface Props {
 }
 
 export default function ComponentsPanel({ onBack, yolo }: Props) {
-  const { t } = useTheme();
+  const { t, theme } = useTheme();
   const [tab, setTab] = useState<KbTab>("modules");
   const [mods, setMods] = useState<Module[]>([]);
   const [kbEntries, setKbEntries] = useState<KnowledgeEntry[]>([]);
@@ -48,6 +48,7 @@ export default function ComponentsPanel({ onBack, yolo }: Props) {
     content: string;
     summary: string;
     mode: KnowledgeMode;
+    retrievalType: RetrievalType;
   } | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -73,13 +74,13 @@ export default function ComponentsPanel({ onBack, yolo }: Props) {
   );
 
   const openNewCard = () => {
-    setEditingCard({ title: "", content: "", summary: "", mode: "framework" });
+    setEditingCard({ title: "", content: "", summary: "", mode: "framework", retrievalType: "inject" });
     setShowEditor(true);
   };
 
   const openEditCard = (entry: KnowledgeEntry) => {
     if (entry.builtin) return;
-    setEditingCard({ id: entry.id, title: entry.title, content: entry.content, summary: entry.summary || "", mode: entry.mode });
+    setEditingCard({ id: entry.id, title: entry.title, content: entry.content, summary: entry.summary || "", mode: entry.mode, retrievalType: entry.retrievalType });
     setShowEditor(true);
   };
 
@@ -88,9 +89,9 @@ export default function ComponentsPanel({ onBack, yolo }: Props) {
     if (!editingCard.title.trim() || !editingCard.content.trim()) return;
     const summaryVal = editingCard.summary.trim() || undefined;
     if (editingCard.id) {
-      updateUserKnowledgeCard(editingCard.id, editingCard.title.trim(), editingCard.content.trim(), editingCard.mode, summaryVal);
+      updateUserKnowledgeCard(editingCard.id, editingCard.title.trim(), editingCard.content.trim(), editingCard.mode, editingCard.retrievalType, summaryVal);
     } else {
-      addUserKnowledgeCard(editingCard.title.trim(), editingCard.content.trim(), editingCard.mode, summaryVal);
+      addUserKnowledgeCard(editingCard.title.trim(), editingCard.content.trim(), editingCard.mode, editingCard.retrievalType, summaryVal);
     }
     setShowEditor(false);
     setEditingCard(null);
@@ -466,9 +467,9 @@ export default function ComponentsPanel({ onBack, yolo }: Props) {
                   <div
                     onClick={(e) => e.stopPropagation()}
                     style={{
-                      width: "480px",
+                      width: "600px",
                       maxWidth: "90vw",
-                      maxHeight: "80vh",
+                      maxHeight: "90vh",
                       display: "flex",
                       flexDirection: "column",
                       background: yolo ? "rgba(15,15,25,0.85)" : "var(--c-bg2)",
@@ -483,34 +484,7 @@ export default function ComponentsPanel({ onBack, yolo }: Props) {
                     <div style={{ fontSize: "15px", fontWeight: 700, color: C.txt, marginBottom: "16px" }}>
                       {editingCard.id ? t("editCard") : t("addKnowledgeCard")}
                     </div>
-                    {/* Mode selector */}
-                    <div style={{ marginBottom: "12px" }}>
-                      <div style={{ fontSize: "12px", color: C.t3, marginBottom: "6px", fontWeight: 500 }}>
-                        {t("kbModeLabel")}
-                      </div>
-                      <select
-                        value={editingCard.mode}
-                        onChange={(e) => setEditingCard((prev) => prev ? { ...prev, mode: e.target.value as KnowledgeMode } : null)}
-                        style={{
-                          width: "100%",
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          border: `1px solid ${C.border}`,
-                          background: yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg)",
-                          color: C.txt,
-                          fontSize: "13px",
-                          outline: "none",
-                          fontFamily: "inherit",
-                          boxSizing: "border-box",
-                          cursor: "pointer",
-                          appearance: "auto",
-                        }}
-                      >
-                        <option value="framework">{t("kbMode_framework")}</option>
-                        <option value="normal">{t("kbMode_normal")}</option>
-                        <option value="yolo">{t("kbMode_yolo")}</option>
-                      </select>
-                    </div>
+                    {/* Row 1: Title */}
                     <input
                       value={editingCard.title}
                       onChange={(e) => setEditingCard((prev) => prev ? { ...prev, title: e.target.value } : null)}
@@ -529,6 +503,65 @@ export default function ComponentsPanel({ onBack, yolo }: Props) {
                         marginBottom: "12px",
                       }}
                     />
+                    {/* Row 2: Mode + RetrievalType side by side */}
+                    <div style={{ display: "flex", gap: "12px", marginBottom: "12px" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: "12px", color: C.t3, marginBottom: "6px", fontWeight: 500 }}>
+                          {t("kbModeLabel")}
+                        </div>
+                        <select
+                          value={editingCard.mode}
+                          onChange={(e) => setEditingCard((prev) => prev ? { ...prev, mode: e.target.value as KnowledgeMode } : null)}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            borderRadius: "8px",
+                            border: `1px solid ${C.border}`,
+                            background: yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg)",
+                            color: C.txt,
+                            fontSize: "13px",
+                            outline: "none",
+                            fontFamily: "inherit",
+                            boxSizing: "border-box",
+                            cursor: "pointer",
+                            appearance: "auto",
+                            colorScheme: theme === "dark" ? "dark" : "light",
+                          }}
+                        >
+                          <option value="framework">{t("kbMode_framework")}</option>
+                          <option value="normal">{t("kbMode_normal")}</option>
+                          <option value="yolo">{t("kbMode_yolo")}</option>
+                        </select>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: "12px", color: C.t3, marginBottom: "6px", fontWeight: 500 }}>
+                          {t("kbRetrievalTypeLabel")}
+                        </div>
+                        <select
+                          value={editingCard.retrievalType}
+                          onChange={(e) => setEditingCard((prev) => prev ? { ...prev, retrievalType: e.target.value as RetrievalType } : null)}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            borderRadius: "8px",
+                            border: `1px solid ${C.border}`,
+                            background: yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg)",
+                            color: C.txt,
+                            fontSize: "13px",
+                            outline: "none",
+                            fontFamily: "inherit",
+                            boxSizing: "border-box",
+                            cursor: "pointer",
+                            appearance: "auto",
+                            colorScheme: theme === "dark" ? "dark" : "light",
+                          }}
+                        >
+                          <option value="inject">{t("kbRetrievalType_inject")}</option>
+                          <option value="retrieve">{t("kbRetrievalType_retrieve")}</option>
+                        </select>
+                      </div>
+                    </div>
+                    {/* Row 3: Summary */}
                     <textarea
                       value={editingCard.summary}
                       onChange={(e) => setEditingCard((prev) => prev ? { ...prev, summary: e.target.value } : null)}
@@ -550,11 +583,12 @@ export default function ComponentsPanel({ onBack, yolo }: Props) {
                         lineHeight: 1.6,
                       }}
                     />
+                    {/* Row 4: Content */}
                     <textarea
                       value={editingCard.content}
                       onChange={(e) => setEditingCard((prev) => prev ? { ...prev, content: e.target.value } : null)}
                       placeholder={t("knowledgeCardContentPlaceholder")}
-                      rows={6}
+                      rows={10}
                       style={{
                         width: "100%",
                         padding: "10px 12px",
@@ -852,8 +886,26 @@ function KbCard({
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-          <div style={{ fontSize: "14px", fontWeight: 600, color: C.txt, lineHeight: 1.5 }}>
-            {entry.title}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+            <div style={{ fontSize: "14px", fontWeight: 600, color: C.txt, lineHeight: 1.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {entry.title}
+            </div>
+            <span
+              style={{
+                fontSize: "10px",
+                fontWeight: 600,
+                padding: "2px 7px",
+                borderRadius: "4px",
+                lineHeight: 1.5,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                ...(entry.retrievalType === "inject"
+                  ? { color: "#22c55e", backgroundColor: "rgba(34,197,94,0.12)" }
+                  : { color: "#60a5fa", backgroundColor: "rgba(96,165,250,0.12)" }),
+              }}
+            >
+              {entry.retrievalType === "inject" ? t("kbRetrievalType_inject") : t("kbRetrievalType_retrieve")}
+            </span>
           </div>
           {!builtin && (
             <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>

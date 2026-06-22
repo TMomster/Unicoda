@@ -7,15 +7,43 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { Conversation, FileAttachment, Message, Mode, ModelConfig, PanelMode, ToolDebugEntry } from "../types";
+import type { Conversation, FileAttachment, Message, Mode, ModelConfig, PanelMode, ToolDebugEntry, PermissionRecord } from "../types";
 import { streamChatCompletion } from "../services/modelApi";
 import { buildAgentSystemPrompt, buildPlannerSystemPrompt, parseToolCalls, stripToolCalls, executeToolCall, type ToolCall, type ToolResult } from "../services/agentEngine";
-import { parseTaskPlan, executeTaskPlan, type TaskPlan } from "../services/taskPlanner";
+import { parseTaskPlan, executeTaskPlan, type TaskPlan, type StepResult } from "../services/taskPlanner";
 import { compressConversation, MIN_MESSAGES_FOR_COMPRESSION, hasCompressionSummary } from "../services/conversationCompression";
 import { playNotificationSound } from "../utils/notificationSound";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
 let nextMsgId = 1;
+
+// ── Module-level pending inline-approval state ───────
+let pendingApprovalResolve: ((result: "approve" | "deny") => void) | null = null;
+let pendingApprovalMsgId: string | null = null;
+
+/** 外部调用（如 MessageBubble 中的按钮）：批准或拒绝当前待审批的工具调用 */
+export function resolvePendingApproval(result: "approve" | "deny"): void {
+  if (pendingApprovalResolve) {
+    pendingApprovalResolve(result);
+    pendingApprovalResolve = null;
+    pendingApprovalMsgId = null;
+  }
+}
+
+// ── Module-level Unicoda Security embedded approval ──
+let pendingSecurityResolve: ((record: PermissionRecord) => void) | null = null;
+let pendingSecurityMsgId: string | null = null;
+
+/** 外部调用（如 MessageBubble 中的嵌入式审批菜单）：用户选择审批策略 */
+export function resolveSecurityApproval(record: PermissionRecord): void {
+  if (pendingSecurityResolve) {
+    pendingSecurityResolve(record);
+    pendingSecurityResolve = null;
+    pendingSecurityMsgId = null;
+  } else {
+    console.warn("[resolveSecurityApproval] pendingSecurityResolve 为 null！无法响应审批。triggerToolId:", record.triggerToolId);
+  }
+}
 
 // ── 类型 ─────────────────────────────────────────────
 
@@ -48,6 +76,8 @@ export interface ChatStreamOptions {
   flushConvs: (convs: Conversation[], path: string) => void;
   /** 消息同步函数（含 memoryMessages 保护） */
   withMsgUpdate: (conv: Conversation, fn: (msgs: Message[]) => Message[]) => Conversation;
+  /** Unicoda Security 是否正在监控（true 时使用嵌入式审批替换模态弹窗） */
+  securityMonitoring?: boolean;
 }
 
 export interface ChatStreamReturn {
@@ -62,6 +92,8 @@ export interface ChatStreamReturn {
   isCompressing: boolean;
   handleToggleCompression: () => void;
   handleCompressNow: (activeId: string | null) => Promise<void>;
+  /** 重置权限审批状态（会话切换时调用，确保各会话权限独立） */
+  resetPermissionRefs: () => void;
   dragOver: boolean;
   pendingFiles: FileAttachment[];
   handleRemovePendingFile: (fileId: string) => void;
@@ -107,6 +139,144 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const streamingMsgIdRef = useRef<string | null>(null);
+
+  // ── Permission approval state ──────────────────────
+  const permissionOverrideRef = useRef<PermissionRecord | null>(null);
+  /** 是否处于"询问"模式——每次工具调用显示"执行"/"取消"按钮而非弹窗 */
+  const isAskModeRef = useRef(false);
+  const securityMonitoring = options.securityMonitoring ?? false;
+
+  /** 显示 inline 审批按钮（"询问"模式），添加待审批的工具消息到会话 */
+  async function showInlineApproval(toolId: string, activeId: string): Promise<"approve" | "deny"> {
+    const msgId = String(nextMsgId++);
+    pendingApprovalMsgId = msgId;
+    const pendingMsg: Message = {
+      id: msgId,
+      role: "tool",
+      content: toolId,
+      toolCallId: toolId,
+      timestamp: Date.now(),
+      pendingApproval: true,
+    };
+    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, pendingMsg]));
+    return new Promise((resolve) => {
+      pendingApprovalResolve = resolve;
+    });
+  }
+
+  /** 持久化一条权限记录 */
+  function persistPermissionRecord(record: PermissionRecord, activeId: string): void {
+    const permMsgId = String(nextMsgId++);
+    const permMsg: Message = {
+      id: permMsgId,
+      role: "system",
+      content: `[权限记录] 操作级别：${record.level}，范围：${record.scope}，抑制提示：${record.suppressPrompt ? "是" : "否"}${record.triggerToolId ? `，触发工具：${record.triggerToolId}` : ""}`,
+      timestamp: record.timestamp,
+      permissionRecord: record,
+    };
+    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, permMsg]));
+  }
+
+  /** Unicoda Security 嵌入式审批：在聊天中嵌入审批菜单并等待用户选择 */
+  async function showSecurityApproval(toolId: string, activeId: string): Promise<PermissionRecord> {
+    const msgId = String(nextMsgId++);
+    pendingSecurityMsgId = msgId;
+    const approvalMsg: Message = {
+      id: msgId,
+      role: "system",
+      content: toolId,
+      timestamp: Date.now(),
+      isSecurityApproval: true,
+    };
+    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, approvalMsg]));
+    const record = await new Promise<PermissionRecord>((resolve) => {
+      pendingSecurityResolve = resolve;
+    });
+    // 审批完成：保留消息并标记确认状态（保留选单印记）
+    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+      msgs.map((m) => m.id === msgId
+        ? { ...m, securityApprovalDone: true, securityApprovalResult: record }
+        : m),
+    ));
+    return record;
+  }
+
+  /**
+   * 操作级权限检查（两层权限系统的操作层）。
+   *
+   * 检查顺序：
+   * 1. 如果是 open_permission_dialog → 直接放行（由 handleOpenPermissionDialog 处理）
+   * 2. 策略层已设置 override（auto_all/deny_round）→ 直接返回 approve/deny
+   * 3. 策略层已设置"询问"模式（isAskModeRef）→ 显示 inline 按钮
+   * 4. 首次/无策略 → 调用策略弹窗（PermissionDialog）让用户设定策略，然后按策略执行
+   */
+  async function checkPermission(toolId: string, activeId: string): Promise<"approve" | "deny"> {
+    // open_permission_dialog 已标记为 sensitive，但其真正的"审批界面"由
+    // handleOpenPermissionDialog 触发（一个完整的配置弹窗），此处不重复拦截。
+    if (toolId === "open_permission_dialog") return "approve";
+
+    const override = permissionOverrideRef.current;
+    if (override) {
+      if (override.scope === "round" || override.scope === "session") {
+        if (override.level === "auto_all") return "approve";
+        if (override.level === "deny_round") return "deny";
+      }
+    }
+    // "询问"模式：显示 inline 审批按钮
+    if (isAskModeRef.current) {
+      return await showInlineApproval(toolId, activeId);
+    }
+    // 首次/无模式
+    if (securityMonitoring) {
+      // Security 监控中 → 使用嵌入式审批
+      const record = await showSecurityApproval(toolId, activeId);
+      persistPermissionRecord(record, activeId);
+      if (record.scope === "round" || record.scope === "session") {
+        permissionOverrideRef.current = record;
+        isAskModeRef.current = false;
+      } else if (record.level === "approve_all" && record.scope === "single") {
+        isAskModeRef.current = true;
+      }
+      return record.level === "approve_all" || record.level === "auto_all" ? "approve" : "deny";
+    }
+    // Security 未启用 → 自动放行（无需审批系统）
+    return "approve";
+  }
+
+  /** 重置权限审批状态（会话切换时调用，确保各会话权限记录独立） */
+  function resetPermissionRefs(): void {
+    permissionOverrideRef.current = null;
+    isAskModeRef.current = false;
+    // 清除待审批的 inline 按钮状态
+    if (pendingApprovalResolve) {
+      pendingApprovalResolve("deny");
+      pendingApprovalResolve = null;
+      pendingApprovalMsgId = null;
+    }
+    // 清除 Security 嵌入式审批状态
+    if (pendingSecurityResolve) {
+      pendingSecurityResolve({ level: "deny_round", scope: "round", suppressPrompt: false, timestamp: Date.now() });
+      pendingSecurityResolve = null;
+      pendingSecurityMsgId = null;
+    }
+  }
+
+  /** 处理 __OPEN_PERMISSION_DIALOG__ 标记：清除状态并重新弹窗 */
+  async function handleOpenPermissionDialog(activeId: string): Promise<void> {
+    permissionOverrideRef.current = null;
+    isAskModeRef.current = false;
+    if (securityMonitoring) {
+      const newRecord = await showSecurityApproval("open_permission_dialog", activeId);
+      persistPermissionRecord(newRecord, activeId);
+      if (newRecord.scope === "round" || newRecord.scope === "session") {
+        permissionOverrideRef.current = newRecord;
+        isAskModeRef.current = false;
+      } else if (newRecord.level === "approve_all" && newRecord.scope === "single") {
+        isAskModeRef.current = true;
+      }
+    }
+    // Security 未启用时，open_permission_dialog 无操作（审批系统不可用）
+  }
 
   // ── Compression state ──────────────────────────────
   const [compressionEnabled, setCompressionEnabled] = useState(false);
@@ -205,10 +375,9 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     const sp = sendMode === "Agent"
       ? buildAgentSystemPrompt("Agent", selectedModel?.systemPrompt, workspacePath, workMode, panelMode, preferredLanguage)
       : buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt, workspacePath, workMode, panelMode, preferredLanguage);
-    const spFirst100 = sp.replace(/\n/g, "\\n").slice(0, 200);
-    console.log(`[buildApiMessages] system prompt (first 200 chars):`, spFirst100);
-    const hasLangRule = sp.includes("【严格语言指令") || sp.includes("【STRICT LANGUAGE RULE") || sp.includes("【STRENGE SPRACHREGEL") || sp.includes("【厳格な言語ルール") || sp.includes("【RÈGLE LINGUISTIQUE STRICTE") || sp.includes("【REGLA DE IDIOMA ESTRICTA");
-    console.log(`[buildApiMessages] system prompt contains language rule:`, hasLangRule);
+    const hasKnowledge = sp.includes("📚 预装填知识库");
+    const injectSection = sp.match(/## 📚 预装填知识库[\s\S]*?(?=\n## |$)/)?.[0] || "(none)";
+    console.log(`[buildApiMessages] system prompt length=${sp.length}, contains inject knowledge=${hasKnowledge}, inject section preview=${injectSection.slice(0, 150).replace(/\n/g, "\\n")}`);
     const kbExtra = prevMessages.find(
       (m) => m.role === "assistant" && (m.content.startsWith("[对话历史摘要]") || m.content.startsWith("[Conversation History Summary]")),
     );
@@ -251,6 +420,13 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     let toolCallRound = 0;
 
     while (!complete) {
+      // 每轮新的 while 迭代开始时清除 round 级别权限覆盖
+      // （round 作用域仅限同一轮 tool call 批处理内的所有调用，
+      //   跨 while 迭代属于不同"工具调用轮次"，不应继承上一轮的 round 覆盖）
+      if (permissionOverrideRef.current?.scope === "round") {
+        permissionOverrideRef.current = null;
+      }
+
       const assistantId = String(nextMsgId++);
       streamingMsgIdRef.current = assistantId;
       const placeholder: Message = { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), streaming: true };
@@ -258,12 +434,14 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
       let fullContent = "";
       let fullReasoning = "";
       let reasoningEnded = false;
+      let lastUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
       const apiMessages = [...initialApiMessages, ...allToolResults];
 
       try {
         for await (const chunk of streamChatCompletion(selectedModel!, apiMessages, abortController.signal)) {
           fullContent += chunk.content;
           fullReasoning += (chunk.reasoningContent || "");
+          if (chunk.usage) lastUsage = chunk.usage;
           if (!reasoningEnded && fullReasoning && chunk.content) reasoningEnded = true;
           const displayContent = stripToolCalls(fullContent);
           const hasToolCall = fullContent.includes("<tool_call") || fullContent.includes("<task_plan");
@@ -291,7 +469,7 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
       }
 
       updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-        msgs.map((msg) => msg.id === assistantId ? { ...msg, streaming: false } : msg),
+        msgs.map((msg) => msg.id === assistantId ? { ...msg, streaming: false, usage: lastUsage } : msg),
       ));
 
       // 同时在 content 和 reasoning_content 中搜索工具调用
@@ -339,23 +517,44 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
         const toolResults: { result: ToolResult; durationMs: number }[] = [];
         for (const call of toolCalls) {
           const startTime = performance.now();
-          const result = await executeToolCall(call, abortController.signal, selectedModel);
+      const permit = async () => await checkPermission(call.id, activeId);
+      const result = await executeToolCall(call, abortController.signal, selectedModel, permit);
           const durationMs = Math.round(performance.now() - startTime);
           toolResults.push({ result, durationMs });
 
+          // 处理 __OPEN_PERMISSION_DIALOG__ 标记
+          const isPermDialogMarker = !result.error && result.content === "__OPEN_PERMISSION_DIALOG__";
+          if (isPermDialogMarker) {
+            await handleOpenPermissionDialog(activeId);
+          }
+
+          const toolMsgId = pendingApprovalMsgId || String(nextMsgId++);
+          pendingApprovalMsgId = null;
           const toolMsg: Message = {
-            id: String(nextMsgId++),
+            id: toolMsgId,
             role: "tool",
-            content: result.content,
+            content: result.error ? "" : isPermDialogMarker ? "" : result.content,
             toolCallId: call.id,
             toolCallError: result.error,
             timestamp: Date.now(),
+            pendingApproval: false,
           };
-          updateConv(activeId, (c) => ({ ...c, messages: [...c.messages, toolMsg], updatedAt: Date.now() }));
+          // 替换 pending 消息或追加新消息
+          updateConv(activeId, (c) => {
+            const idx = c.messages.findIndex((m) => m.id === toolMsgId);
+            if (idx >= 0) {
+              const msgs = [...c.messages];
+              msgs[idx] = toolMsg;
+              return { ...c, messages: msgs, updatedAt: Date.now() };
+            }
+            return { ...c, messages: [...c.messages, toolMsg], updatedAt: Date.now() };
+          });
 
           allToolResults.push({
             role: "user" as const,
-            content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
+            content: isPermDialogMarker
+              ? `[工具执行结果 - ${call.id}]\n权限设置对话框已打开。`
+              : `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
           });
 
           if (toolCalls.length > 1) await new Promise((r) => setTimeout(r, 500));
@@ -441,7 +640,12 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     // ═══════════════════════════════════════════════════════════
     const planMsgId = String(nextMsgId++);
     const planCardContent = taskPlan
-      ? `🎯 **目标**：${taskPlan.intent}\n💡 **分析**：${taskPlan.feasibility}\n\n📋 **执行步骤**：${taskPlan.steps.length > 0 ? "" : "（无需工具，直接回复）"}\n${taskPlan.steps.map((s, i) => `  **步骤 ${i + 1}**：${s.description}（\`${s.tool}\`）`).join("\n")}`
+      ? `🎯 **目标**：${taskPlan.intent}\n💡 **分析**：${taskPlan.feasibility}\n\n📋 **执行步骤**：${taskPlan.steps.length > 0 ? "" : "（无需工具，直接回复）"}\n${taskPlan.steps.map((s, i) => {
+          if ("type" in s && s.type === "subagent") {
+            return `  **步骤 ${i + 1}**：${s.description}（\`子智能体\`）`;
+          }
+          return `  **步骤 ${i + 1}**：${s.description}（\`${(s as { tool: string }).tool}\`）`;
+        }).join("\n")}`
       : "📋 未生成任务计划，直接回复。";
     const planCard: Message = {
       id: planMsgId,
@@ -472,48 +676,221 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
 
       allToolResults.push({ role: "assistant", content: `<task_plan>${JSON.stringify(taskPlan)}</task_plan>` });
 
-      const stepResults = await executeTaskPlan(taskPlan, abortController.signal, selectedModel);
-
+      const taskPermit = async () => await checkPermission("task_plan_step", activeId);
+      const stepResults: StepResult[] = [];
       let planExecSummary = planCardContent + "\n\n";
-      for (let i = 0; i < stepResults.length; i++) {
-        const sr = stepResults[i];
+
+      for await (const sr of executeTaskPlan(taskPlan, abortController.signal, selectedModel, currentMode, panelMode, taskPermit)) {
+        stepResults.push(sr);
+        const i = stepResults.length - 1;
+        if (abortController.signal.aborted) break;
+
+        // 实时更新计划卡片——每完成一步立即更新状态
         const statusIcon = sr.result.error ? "❌" : "✅";
         planExecSummary += `${statusIcon} **步骤 ${i + 1}**：${taskPlan.steps[i]?.description}（${sr.durationMs}ms）\n`;
-      }
-      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-        msgs.map((msg) =>
-          msg.id === planMsgId
-            ? { ...msg, content: planExecSummary, toolCallResultCount: stepResults.length }
-            : msg,
-        ),
-      ));
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+          msgs.map((msg) =>
+            msg.id === planMsgId
+              ? { ...msg, content: planExecSummary, toolCallResultCount: stepResults.length }
+              : msg,
+          ),
+        ));
 
-      for (let i = 0; i < stepResults.length; i++) {
-        if (abortController.signal.aborted) break;
-        const sr = stepResults[i];
+        // 实时添加工具执行消息
+        const stepInfo = taskPlan.steps[i];
+        const isSubagent = stepInfo && "type" in stepInfo && stepInfo.type === "subagent";
+        const toolLabel = isSubagent ? "子智能体" : `工具: ${(stepInfo as { tool?: string })?.tool || "?"}`;
+
+        // 检测 __OPEN_PERMISSION_DIALOG__ 标记
+        const isPermDialogMarker = !sr.result.error && sr.result.content === "__OPEN_PERMISSION_DIALOG__";
+        if (isPermDialogMarker) {
+          await handleOpenPermissionDialog(activeId);
+        }
+
+        const toolMsgId = pendingApprovalMsgId || String(nextMsgId++);
+        pendingApprovalMsgId = null;
         const toolMsg: Message = {
-          id: String(nextMsgId++),
+          id: toolMsgId,
           role: "tool",
-          content: sr.result.error ? "" : sr.result.content,
-          toolCallId: `${taskPlan.steps[i]?.id || "plan-step-" + i}`,
+          content: sr.result.error ? "" : isPermDialogMarker ? "" : sr.result.content,
+          toolCallId: `${stepInfo?.id || "plan-step-" + i}`,
           toolCallError: sr.result.error,
           timestamp: Date.now(),
+          pendingApproval: false,
         };
-        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, toolMsg]));
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => {
+          const idx = msgs.findIndex((m) => m.id === toolMsgId);
+          if (idx >= 0) {
+            const copy = [...msgs];
+            copy[idx] = toolMsg;
+            return copy;
+          }
+          return [...msgs, toolMsg];
+        }));
 
         allToolResults.push({
           role: "user" as const,
-          content: `[任务执行结果 - ${taskPlan.steps[i]?.description || "步骤" + (i + 1)} (工具: ${taskPlan.steps[i]?.tool})]\n${sr.result.error ? `执行错误：${sr.result.error}` : sr.result.content}`,
+          content: isPermDialogMarker
+            ? `[任务执行结果 - ${stepInfo?.description || "步骤" + (i + 1)} (${toolLabel})]\n权限设置对话框已打开。`
+            : `[任务执行结果 - ${stepInfo?.description || "步骤" + (i + 1)} (${toolLabel})]\n${sr.result.error ? `执行错误：${sr.result.error}` : sr.result.content}`,
         });
       }
 
+      // ═══════════════════════════════════════════════════════════
+      // RETRY PHASE：对失败步骤的错误修正自动重试
+      // ═══════════════════════════════════════════════════════════
+      const MAX_RETRY_ROUNDS = 3;
+      const hasErrors = stepResults.some((sr) => sr.result.error);
+
+      if (hasErrors && !abortController.signal.aborted) {
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+          msgs.map((msg) =>
+            msg.id === planMsgId
+              ? { ...msg, content: `${planExecSummary}\n\n🔄 **错误修正重试中...**` }
+              : msg,
+          ),
+        ));
+
+        let retryRound = 0;
+        let unresolvedErrors = true;
+
+        while (unresolvedErrors && retryRound < MAX_RETRY_ROUNDS && !abortController.signal.aborted) {
+          // 注意：不在此处清除 permissionOverrideRef！
+          // 如果用户在 PermissionDialog 中选择了 deny_round，则该策略应延续到整个重试过程，
+          // 因为重试仍然属于同一轮对话。清除会导致权限弹窗反复弹出，体验极差。
+          // 技术性错误的重试不会触发弹窗（除非被拒绝的是不同工具）。
+          retryRound++;
+
+          // 收集失敗步骤信息
+          const failedSteps = stepResults
+            .map((sr, i) => ({ result: sr, index: i }))
+            .filter((s) => s.result.result.error);
+
+          const errorContext = failedSteps
+            .map(
+              (fs) =>
+                `步骤 ${fs.index + 1}: ${taskPlan.steps[fs.index]?.description || "未知步骤"}\n` +
+                `  工具: ${taskPlan.steps[fs.index]?.tool || "未知"}\n` +
+                `  参数: ${JSON.stringify(taskPlan.steps[fs.index]?.params || {})}\n` +
+                `  错误信息: ${fs.result.result.error}`,
+            )
+            .join("\n\n");
+
+          const retryPrompt = `[系统指令：错误修正重试 - 第 ${retryRound} 轮]
+
+以下任务计划步骤执行失败：
+
+${errorContext}
+
+请分析上述错误原因，使用 \`<tool_call>\` 执行修正操作（如修改文件代码后重新执行命令、更换搜索词重新搜索、调整参数后重新调用等）。
+
+最多只能输出 \`<tool_call>\` 标签，不要输出任何其他内容。`;
+
+          const retryApiMessages = [
+            ...initialApiMessages,
+            ...allToolResults,
+            { role: "user" as const, content: retryPrompt },
+          ];
+
+          let retryContent = "";
+          try {
+            for await (const chunk of streamChatCompletion(selectedModel!, retryApiMessages, abortController.signal)) {
+              retryContent += chunk.content;
+            }
+          } catch (retryErr) {
+            console.warn("[handleAgentSend] 重试 LLM 调用失败:", retryErr);
+            break;
+          }
+
+          // 解析 LLM 的修正 tool calls
+          const retryCalls = parseToolCalls(retryContent);
+
+          if (retryCalls.length === 0) {
+            // LLM 未生成修正调用，退出循环
+            break;
+          }
+
+          // 更新计划卡片显示当前轮次
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+            msgs.map((msg) =>
+              msg.id === planMsgId
+                ? { ...msg, content: `${planExecSummary}\n\n🔄 **错误修正重试中...（第 ${retryRound}/${MAX_RETRY_ROUNDS} 轮，${retryCalls.length} 个修正调用）**` }
+                : msg,
+            ),
+          ));
+
+          // 执行所有修正调用
+          let allRetrySucceeded = true;
+          for (const call of retryCalls) {
+            if (abortController.signal.aborted) break;
+
+            const retryPermit = async () => await checkPermission(call.id, activeId);
+            const result = await executeToolCall(call, abortController.signal, selectedModel, retryPermit);
+
+            const isPermDialogMarker = !result.error && result.content === "__OPEN_PERMISSION_DIALOG__";
+            if (isPermDialogMarker) {
+              await handleOpenPermissionDialog(activeId);
+            }
+
+            const toolMsgId = pendingApprovalMsgId || String(nextMsgId++);
+            pendingApprovalMsgId = null;
+            const toolMsg: Message = {
+              id: toolMsgId,
+              role: "tool",
+              content: result.error ? "" : isPermDialogMarker ? "" : result.content,
+              toolCallId: call.id,
+              toolCallError: result.error,
+              timestamp: Date.now(),
+              pendingApproval: false,
+            };
+            updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => {
+              const idx = msgs.findIndex((m) => m.id === toolMsgId);
+              if (idx >= 0) {
+                const copy = [...msgs];
+                copy[idx] = toolMsg;
+                return copy;
+              }
+              return [...msgs, toolMsg];
+            }));
+
+            allToolResults.push({
+              role: "user" as const,
+              content: isPermDialogMarker
+                ? `[修正重试结果 - ${call.id}]\n权限设置对话框已打开。`
+                : `[修正重试结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
+            });
+
+            if (result.error) {
+              allRetrySucceeded = false;
+            }
+
+            if (retryCalls.length > 1) await new Promise((r) => setTimeout(r, 300));
+          }
+
+          // 本轮全部成功则退出重试循环
+          if (allRetrySucceeded) {
+            unresolvedErrors = false;
+          }
+        }
+
+        // 更新计划卡片显示重试完成状态
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+          msgs.map((msg) =>
+            msg.id === planMsgId
+              ? { ...msg, content: `${planExecSummary}\n\n${unresolvedErrors ? "⚠️" : "✅"} **错误修正结束**（共 ${retryRound} 轮）` }
+              : msg,
+          ),
+        ));
+      }
+
+      // ── "禁止新工具调用"强制指令 ──
       allToolResults.push({
         role: "user" as const,
         content: `[系统强制指令] 所有任务计划步骤已全部执行完毕。以下是你必须遵守的最重要规则：
 
 1. **禁止输出任何 <tool_call> 或 <task_plan> 标签**——所有工具调用已经完成。
 2. **基于上述所有工具执行结果，直接生成最终回复给用户**。
-3. 如果你的某个步骤返回为空或错误，基于已有信息尽力回答即可，**不要尝试重新调用**。
+3. 无论是否有步骤执行错误，基于已有信息尽力回答即可，**不要再次尝试重新调用工具**。
 4. **不要自我质疑**——"也许搜索词不对"、"要不要再看看其他目录"这类犹豫已被计划系统处理完毕。
 5. **不要输出"让我看看"、"我来查一下"等空头承诺**——工具已经在计划中执行过了。
 6. **不要重复思考过程**——直接给出结论。
@@ -534,12 +911,14 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     let fullContent = "";
     let fullReasoning = "";
     let reasoningEnded = false;
+    let lastUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
     const finalApiMessages = [...initialApiMessages, ...allToolResults];
 
     try {
       for await (const chunk of streamChatCompletion(selectedModel!, finalApiMessages, abortController.signal)) {
         fullContent += chunk.content;
         fullReasoning += (chunk.reasoningContent || "");
+        if (chunk.usage) lastUsage = chunk.usage;
         if (!reasoningEnded && fullReasoning && chunk.content) reasoningEnded = true;
         const displayContent = stripToolCalls(fullContent);
         const hasToolCall = fullContent.includes("<tool_call") || fullContent.includes("<task_plan");
@@ -563,7 +942,7 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     }
 
     updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-      msgs.map((msg) => msg.id === assistantId ? { ...msg, streaming: false } : msg),
+      msgs.map((msg) => msg.id === assistantId ? { ...msg, streaming: false, usage: lastUsage } : msg),
     ));
 
     // 最终回复中的 tool_call 检测（仅当无计划时的降级处理）
@@ -586,16 +965,32 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
 
       for (const call of toolCalls) {
         if (abortController.signal.aborted) break;
-        const result = await executeToolCall(call, abortController.signal, selectedModel);
+        const phase4Permit = async () => await checkPermission(call.id, activeId);
+        const result = await executeToolCall(call, abortController.signal, selectedModel, phase4Permit);
+        const isPermDialogMarker = !result.error && result.content === "__OPEN_PERMISSION_DIALOG__";
+        if (isPermDialogMarker) {
+          await handleOpenPermissionDialog(activeId);
+        }
+        const toolMsgId = pendingApprovalMsgId || String(nextMsgId++);
+        pendingApprovalMsgId = null;
         const toolMsg: Message = {
-          id: String(nextMsgId++),
+          id: toolMsgId,
           role: "tool",
-          content: result.content,
+          content: result.error ? "" : isPermDialogMarker ? "" : result.content,
           toolCallId: call.id,
           toolCallError: result.error,
           timestamp: Date.now(),
+          pendingApproval: false,
         };
-        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, toolMsg]));
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => {
+          const idx = msgs.findIndex((m) => m.id === toolMsgId);
+          if (idx >= 0) {
+            const copy = [...msgs];
+            copy[idx] = toolMsg;
+            return copy;
+          }
+          return [...msgs, toolMsg];
+        }));
         if (toolCalls.length > 1) await new Promise((r) => setTimeout(r, 500));
       }
 
@@ -739,6 +1134,11 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
         && currentConv.messages.length === 0
         && !currentConv.autoTitleDone;
 
+      // 重置本轮权限覆盖状态（仅清除 round 范围，session 范围跨多轮保留）
+      if (permissionOverrideRef.current?.scope === "round") {
+        permissionOverrideRef.current = null;
+      }
+
       setIsStreaming(true);
       const abortController = new AbortController();
       abortRef.current = abortController;
@@ -820,6 +1220,7 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     isCompressing,
     handleToggleCompression,
     handleCompressNow,
+    resetPermissionRefs,
     dragOver,
     pendingFiles,
     handleRemovePendingFile,

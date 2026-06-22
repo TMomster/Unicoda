@@ -5,7 +5,8 @@ import { useModels } from "./contexts/ModelContext";
 import { ModelProvider } from "./contexts/ModelContext";
 import { LockProvider } from "./contexts/LockContext";
 import { SearchProvider } from "./contexts/SearchContext";
-import { useChatStream, setNextMsgId } from "./hooks/useChatStream";
+import { useSecurity } from "./contexts/SecurityContext";
+import { useChatStream, setNextMsgId, type ChatStreamReturn } from "./hooks/useChatStream";
 import { readConfigFile, writeConfigFile } from "./utils/configStorage";
 import { initBuiltinModules } from "./modules/registry";
 import "./modules/moduleImports";
@@ -60,6 +61,7 @@ function makeConvTitle(existing: Conversation[], locale: string): string {
 // ─── Inner component that has access to ModelProvider context ──────
 function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPanelMode: React.Dispatch<React.SetStateAction<PanelMode>> }) {
   const { scale, fontFamily, t, locale, preferredLanguage, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode, theme } = useTheme();
+  const { securityEnabled } = useSecurity();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     // 快速初始加载：优先用 localStorage 缓存的元数据
@@ -164,9 +166,11 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     })();
   }, [sessionPath, activeId]);
 
-  // Ref 持有最新会话列表和路径，供 handleSend 完成后写文件
+  // Refs 持有最新值，避免 debounce 和闭包捕获过期值
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
   const sessionPathRef = useRef(sessionPath);
   sessionPathRef.current = sessionPath;
 
@@ -176,6 +180,9 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [transitionPhase, setTransitionPhase] = useState<"blur" | "fade" | "reveal">("blur");
   const [yoloEntryKey, setYoloEntryKey] = useState(0);
+
+  // ref holds chatStream before its hook call, preventing TDZ in handleSelect
+  const chatStreamRef = useRef<ChatStreamReturn>(null!);
 
   const handleTogglePanel = useCallback(() => {
     if (isTransitioning) return;
@@ -215,6 +222,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
   const handleCreate = useCallback(() => {
     const newId = String(nextConvId++);
+    const pathRef = sessionPathRef.current;
     setConversations((prev) => {
       const conv: Conversation = {
         id: newId,
@@ -225,13 +233,16 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      return [...prev, conv];
+      const updated = [...prev, conv];
+      flushConversations(updated, pathRef);
+      return updated;
     });
     setActiveId(newId);
   }, [locale]);
 
   const handleSelect = useCallback((id: string) => {
     setActiveId(id);
+    chatStreamRef.current.resetPermissionRefs();
   }, []);
 
   const handleRename = useCallback(
@@ -418,7 +429,9 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       flushTimerRef.current = setTimeout(async () => {
         flushTimerRef.current = null;
-        const activeConv = convs.find((c) => c.id === activeId) ?? null;
+        // 从 ref 读取最新 activeId，避免 debounce 闭包捕获过期值
+        const latestActiveId = activeIdRef.current;
+        const activeConv = convs.find((c) => c.id === latestActiveId) ?? null;
         const metas = convs.map(toMeta);
         await flushConversationData(activeConv, metas, "normal", path);
         try {
@@ -426,8 +439,11 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         } catch { /* ignore */ }
       }, 100);
     },
-    [activeId],
+    [], // 无依赖：所有需要的最新值通过 ref 读取
   );
+
+  // ── Security 审批流程（由 UnicodaSecurity 全权负责） ──
+  const securityMonitoring = securityEnabled;
 
   // ── Chat stream hook ───────────────────────────────────────
   const chatStream = useChatStream({
@@ -446,7 +462,9 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     locale,
     flushConvs: flushConversations,
     withMsgUpdate,
+    securityMonitoring,
   });
+  chatStreamRef.current = chatStream;
 
   const handleSendWrapper = useCallback(
     (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
@@ -490,8 +508,15 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   // ── Ctrl+P Print Dialog (with context guards + toast) ──
   const printGuardRef = useRef({ isLocked: false, panelMode: "Default" as PanelMode, settingsOpen: false, componentsOpen: false, hasActiveConv: false });
   printGuardRef.current = { isLocked, panelMode, settingsOpen, componentsOpen, hasActiveConv: activeConv !== null };
+  const handleCreateRef = useRef(handleCreate);
+  handleCreateRef.current = handleCreate;
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        handleCreateRef.current();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
         e.preventDefault();
         const g = printGuardRef.current;
@@ -515,7 +540,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   // ── 全局拦截浏览器默认按键/右键（捕获阶段） ──
   useEffect(() => {
     // 浏览器快捷键黑名单（Ctrl+key / Cmd+key）
-    const blockedCtrl: string[] = ["t", "w", "n", "r", "s", "u", "h", "j", "d", "o", "F5", "F11"];
+    const blockedCtrl: string[] = ["t", "w", "n", "r", "s", "u", "h", "j", "d", "o", "k", "F5", "F11"];
     // Ctrl+Shift 组合黑名单
     const blockedShiftCtrl: string[] = ["i", "j", "c", "n"];
     // F1-F12 全部拦截（开发工具、帮助等）
@@ -701,6 +726,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
               {/* Input */}
               {activeConv && (
                 <InputBar
+                  key={activeId}
                   onSend={handleSendWrapper}
                   onStop={chatStream.handleStop}
                   disabled={chatStream.isStreaming}

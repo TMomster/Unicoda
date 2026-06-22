@@ -3,6 +3,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { useModels } from "../contexts/ModelContext";
 import { useLock } from "../contexts/LockContext";
 import { useSearch } from "../contexts/SearchContext";
+import { useSecurity } from "../contexts/SecurityContext";
 import { getConfigDir, resolveDefaultSessionDir } from "../utils/configStorage";
 import { invoke } from "@tauri-apps/api/core";
 import AnimatedSection from "./AnimatedSection";
@@ -98,10 +99,13 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
   const { models, selectedModelId, setSelectedModelId, addModel, updateModel, removeModel } = useModels();
   const { hasPassword, privacyEnabled, setPrivacyEnabled, idleTimeout, setIdleTimeout, startupLockEnabled, setStartupLockEnabled, setPassword, changePassword, clearPassword } = useLock();
   const { config: searxng, updateConfig: updateSearxng } = useSearch();
+  const { securityEnabled, setSecurityEnabled, isMonitoring } = useSecurity();
   const pct = scale;
   const [eid, se] = useState<string | null>(null);
   const [pExp, spE] = useState(false); const [mExp, smE] = useState(false); const [sxExp, setSxExp] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [disableSecurityConfirm, setDisableSecurityConfirm] = useState(false);
+  const [disableConsentChecked, setDisableConsentChecked] = useState(false);
   // const [pcm, spcm] = useState<Record<string, boolean>>({});
   const [lp, slp] = useState(""); const [lc, slc] = useState(""); const [lm, slm] = useState<{ t: "ok" | "err"; text: string } | null>(null);
   const [cm, scm] = useState(false); const [cop, scop] = useState(""); const [cnp, scnp] = useState(""); const [ccp, sccp] = useState("");
@@ -439,6 +443,57 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
             </div>
           </AnimatedSection>
         </SE>
+        <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
+
+        {/* ── Unicoda Security ── */}
+        <SE yolo={y} title={t("securityService")} desc={t("securityServiceDesc")}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+            <span style={fl}>{t("securityService")}</span>
+            <SW on={securityEnabled} oc={() => {
+              if (securityEnabled) {
+                // 关闭需要二次确认
+                setDisableSecurityConfirm(true);
+              } else {
+                setSecurityEnabled(true);
+              }
+            }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderRadius: "8px", border: `1px solid ${C.border}`, background: C.bg, fontSize: "13px", color: C.t2, marginBottom: "8px", lineHeight: 1.6 }}>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: isMonitoring ? "#22c55e" : securityEnabled ? "#f59e0b" : "#5a5a5e", flexShrink: 0 }} />
+            {isMonitoring ? t("securityActive") : securityEnabled ? t("securityEnabled") : t("securityDisabled")}
+          </div>
+        </SE>
+        {/* ── 关闭 Security 的二次确认弹窗 ── */}
+        {disableSecurityConfirm && (
+          <div onClick={() => { setDisableSecurityConfirm(false); }}
+            style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)" }}>
+            <div onClick={(e) => e.stopPropagation()}
+              style={{ background: "var(--c-bg2)", border: "1px solid var(--c-bd)", borderRadius: "12px", padding: "24px", width: "420px", maxWidth: "90vw", display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ fontSize: "16px", fontWeight: 700, color: C.txt, lineHeight: 1.6 }}>{t("securityDisableConfirmTitle")}</div>
+              <div style={{ fontSize: "13px", color: C.t2, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{t("securityDisableConfirm")}</div>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: "8px", cursor: "pointer", fontSize: "13px", color: C.t2, userSelect: "none", lineHeight: 1.6 }}>
+                <input type="checkbox" checked={disableConsentChecked} onChange={(e) => setDisableConsentChecked(e.target.checked)}
+                  style={{ accentColor: "#3b82f6", width: "16px", height: "16px", marginTop: "2px", cursor: "pointer", flexShrink: 0 }} />
+                <span>{t("securityDisableConsent")}</span>
+              </label>
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                <button onClick={() => { setDisableSecurityConfirm(false); }}
+                  style={{ padding: "8px 16px", borderRadius: "6px", border: `1px solid ${C.border}`, background: "transparent", color: C.t2, fontSize: "12px", cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6 }}>
+                  {t("cancel")}
+                </button>
+                <button onClick={() => {
+                  if (!disableConsentChecked) return;
+                  setSecurityEnabled(false);
+                  setDisableSecurityConfirm(false);
+                  setDisableConsentChecked(false);
+                }}
+                  style={{ padding: "8px 16px", borderRadius: "6px", border: "none", background: disableConsentChecked ? "#ef4444" : "var(--c-bd)", color: disableConsentChecked ? "#fff" : "var(--c-t4)", fontSize: "12px", fontWeight: 600, cursor: disableConsentChecked ? "pointer" : "default", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s" }}>
+                  确认关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
         <SE yolo={y} title={t("sessionStorage")}>

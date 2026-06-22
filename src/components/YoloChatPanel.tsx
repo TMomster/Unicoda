@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import type { Message, FileAttachment } from "../types";
 import MessageBubble from "./MessageBubble";
+import SecurityBubble from "./SecurityBubble";
 
 interface Props {
   messages: Message[];
@@ -85,6 +86,7 @@ export default function YoloChatPanel({
           margin: "0 auto",
           padding: "0 24px",
         }}>
+          <SecurityBubble t={t} />
           {messages.map((msg) => (
             <MessageBubble
               key={msg.id}
@@ -100,6 +102,15 @@ export default function YoloChatPanel({
               onPreviewFile={onPreviewFile}
             />
           ))}
+          {(() => {
+            const lastUsage = messages.filter((m) => m.role === "assistant" && m.usage).pop()?.usage;
+            if (!lastUsage || isStreaming) return null;
+            return (
+              <div style={{ textAlign: "center", padding: "8px 0 4px", fontSize: "11px", color: "var(--c-t5)", userSelect: "none", fontFamily: "monospace" }}>
+                ↑ {lastUsage.prompt_tokens.toLocaleString()} 输入 · {lastUsage.completion_tokens.toLocaleString()} 输出 · 共计 {lastUsage.total_tokens.toLocaleString()} tokens
+              </div>
+            );
+          })()}
         </div>
       </div>
 

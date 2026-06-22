@@ -560,6 +560,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, memoryMes
           {/* Textarea */}
           <textarea
             ref={textareaRef}
+            autoFocus
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}

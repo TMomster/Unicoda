@@ -8,11 +8,19 @@
  */
 import type { ModelConfig } from "../types";
 
+export interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 export interface StreamChunk {
   /** 普通回复文本片段 */
   content: string;
   /** 思考/推理过程文本片段（DeepSeek thinking 模式） */
   reasoningContent: string;
+  /** API 返回的 token 消耗信息（仅在最后一条 chunk 中携带） */
+  usage?: TokenUsage;
 }
 
 function getDefaultBaseUrl(provider: string): string {
@@ -178,7 +186,8 @@ export async function* streamChatCompletion(
         const delta = choice?.delta;
         const content = delta?.content ?? choice?.text ?? "";
         const reasoningContent = delta?.reasoning_content ?? "";
-        if (content || reasoningContent) yield { content, reasoningContent };
+        const usage = parsed.usage ? { prompt_tokens: parsed.usage.prompt_tokens, completion_tokens: parsed.usage.completion_tokens, total_tokens: parsed.usage.total_tokens } : undefined;
+        if (content || reasoningContent || usage) yield { content, reasoningContent, usage };
       } catch {
         // 跳过格式异常的 SSE 行
       }

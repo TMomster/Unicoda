@@ -105,6 +105,25 @@ function escapePSPath(p: string): string {
   return p.replace(/`/g, "``").replace(/\$/g, "`$").replace(/"/g, '""');
 }
 
+// ── 全项目检查命令 ─────────────────────────────────
+function buildProjectLintCommand(language: string, projectDir: string): string {
+  const safeDir = escapePSPath(projectDir);
+  switch (language) {
+    case "typescript":
+    case "tsx":
+      return `cd "${safeDir}"; Write-Output "=== TypeScript 类型检查 ==="; npx --yes tsc --noEmit --pretty 2>&1; Write-Output "=== ESLint 项目检查 ==="; if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint . } else { npx --yes eslint . }`;
+    case "javascript":
+    case "jsx":
+      return `cd "${safeDir}"; Write-Output "=== ESLint 项目检查 ==="; if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint . } else { npx --yes eslint . }`;
+    case "rust":
+      return `cd "${safeDir}"; Write-Output "=== Rust 编译检查 ==="; cargo check 2>&1; Write-Output "=== Clippy 项目检查 ==="; cargo clippy --all-targets 2>&1`;
+    case "python":
+      return `cd "${safeDir}"; Write-Output "=== Python 代码检查 ==="; python -m flake8 . 2> $null; if ($LASTEXITCODE -ne 0) { python -m pylint . 2> $null }`;
+    default:
+      return "";
+  }
+}
+
 // ── 各语言的 lint 命令构建 ─────────────────────────
 
 function buildLintCommand(language: string, path: string, code: string): string {
@@ -120,7 +139,8 @@ function buildLintCommand(language: string, path: string, code: string): string 
       return `if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint "${safePath}" } else { npx --yes eslint "${safePath}" }`;
     case "typescript":
     case "tsx":
-      return `if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint --ext .ts,.tsx "${safePath}" } else { npx --yes eslint --ext .ts,.tsx "${safePath}" }`;
+      // 先运行 tsc --noEmit 做类型检查，再运行 eslint 做风格检查
+      return `Write-Output "=== TypeScript 类型检查 ==="; npx --yes tsc --noEmit --pretty 2>&1; Write-Output "=== ESLint 代码风格检查 ==="; if (Get-Command eslint -ErrorAction SilentlyContinue) { eslint --ext .ts,.tsx "${safePath}" } else { npx --yes eslint --ext .ts,.tsx "${safePath}" }`;
     case "css":
     case "scss":
     case "less":
@@ -132,7 +152,8 @@ function buildLintCommand(language: string, path: string, code: string): string 
     case "python":
       return `python -m flake8 "${safePath}" 2> $null; if ($LASTEXITCODE -ne 0) { python -m pylint "${safePath}" 2> $null }`;
     case "rust":
-      return `cargo clippy --all-targets 2>&1`;
+      // 先 cargo check 做编译检查，再 cargo clippy 做 lint 检查
+      return `Write-Output "=== Rust 编译检查 ==="; cargo check 2>&1; Write-Output "=== Clippy 代码检查 ==="; cargo clippy --all-targets 2>&1`;
     case "yaml":
       return `if (Get-Command yamllint -ErrorAction SilentlyContinue) { yamllint "${safePath}" } else { python -m yamllint "${safePath}" 2> $null }`;
     default:
@@ -167,22 +188,24 @@ const mod: Module = {
   id: "lint_code",
   name: "代码检查",
   description:
-    "对代码文件或代码片段执行 lint 检查，报告语法错误、风格问题和潜在缺陷。\n\n" +
-    "支持的格式（通过文件扩展名或 language 参数指定）：\n" +
+    "对代码或项目执行 lint 检查，报告语法错误、类型错误、风格问题和潜在缺陷。\n\n" +
+    "支持的语言及其检查工具：\n" +
     "- JavaScript/JSX (.js/.jsx/.mjs) — eslint\n" +
-    "- TypeScript/TSX (.ts/.tsx) — eslint\n" +
+    "- TypeScript/TSX (.ts/.tsx) — tsc --noEmit（类型检查）+ eslint（风格检查）\n" +
     "- CSS/SCSS/Less (.css/.scss/.less) — stylelint\n" +
     "- HTML (.html/.htm) — htmlhint\n" +
     "- JSON (.json) — 内置语法校验（无需额外工具）\n" +
     "- Markdown (.md) — markdownlint\n" +
     "- Python (.py) — flake8 / pylint\n" +
-    "- Rust (.rs) — cargo clippy\n" +
+    "- Rust (.rs) — cargo check（编译检查）+ cargo clippy（代码质量）\n" +
     "- YAML (.yaml/.yml) — yamllint\n\n" +
     "使用方法：\n" +
-    "1. 传入 path 参数检查文件（推荐）\n" +
+    "1. 传入 path 检查指定文件（推荐）\n" +
     "2. 传入 code + language 检查代码片段\n" +
-    "提示用户：lint 工具（eslint 等）需要提前安装或通过 npx 自动下载。",
-  userDescription: "检查代码语法、风格和潜在问题",
+    "3. 对于 Rust / TypeScript 项目，检查单个文件时会自动触发全项目编译检查\n\n" +
+    "特别注意：TypeScript 的 tsc --noEmit 和 Rust 的 cargo check 会检查整个项目，" +
+    "如果项目中其他文件有预存错误也会一并报告。LLM 应根据文件名过滤相关错误。",
+  userDescription: "检查代码语法、类型、风格和潜在问题",
   level: "normal",
   parameters: [
     {
@@ -206,12 +229,55 @@ const mod: Module = {
       description:
         "代码语言标识。可选值：javascript / typescript / css / html / json / markdown / python / rust / yaml。与 code 配合使用，或补充 path 的自动推断。",
     },
+    {
+      name: "fullProject",
+      type: "string",
+      required: false,
+      description:
+        '设为 "true" 时对整个项目执行完整检查（而不仅是指定文件）。\n' +
+        "- TypeScript 项目：运行 `tsc --noEmit` 检查整个项目类型\n" +
+        "- Rust 项目：运行 `cargo check` 检查整个 crate\n" +
+        "- 其他语言：检查工作区所有匹配文件\n\n" +
+        "注意：`fullProject=true` 时 path 参数可选。不传 path 时从工作区根目录推断。",
+    },
   ],
   execute: async function* (params, _signal) {
     const path = params.path?.trim();
     let code = params.code?.trim();
     const language = detectLanguage(path, params.language);
+    const fullProject = params.fullProject?.trim().toLowerCase() === "true";
 
+    // 全项目检查模式
+    if (fullProject) {
+      // 从 path 推断项目目录，或从语言推断默认工作区
+      let projectDir = path || ".";
+      // 如果是文件路径，取所在目录
+      if (path && !path.endsWith("\\") && !path.endsWith("/")) {
+        // 可能是文件路径，取父目录
+        const lastSepIndex = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+        if (lastSepIndex >= 0) {
+          projectDir = path.substring(0, lastSepIndex) || ".";
+        }
+      }
+
+      if (!language) {
+        yield "⚠️ 全项目检查需要指定 language 参数（typescript / rust / javascript / python）。";
+        return;
+      }
+
+      const command = buildProjectLintCommand(language, projectDir);
+      if (!command) {
+        yield `⚠️ 暂不支持 ${language} 的全项目检查。支持：typescript, rust, javascript, python`;
+        return;
+      }
+
+      yield `🔍 正在对 ${language} 项目进行完整检查...\n`;
+      const result = await runCmd(command, 120000);
+      yield formatOutput(language, result, `项目目录: ${projectDir}`);
+      return;
+    }
+
+    // 单文件/代码片段模式（原有逻辑）
     // 校验参数
     if (!path && !code) {
       yield "参数不足：请提供 path（文件路径）或 code + language（代码内容 + 语言）。";
@@ -262,7 +328,6 @@ const mod: Module = {
       return;
     }
 
-    // 检查是否需要先安装工具
     yield `🔍 正在检查 ${language} 代码...\n`;
 
     const result = await runCmd(command, 60000);

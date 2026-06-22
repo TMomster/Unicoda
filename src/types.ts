@@ -1,3 +1,17 @@
+/** 敏感模组操作审批记录 */
+export interface PermissionRecord {
+  /** 用户选择 */
+  level: "approve_all" | "auto_all" | "deny_round";
+  /** 作用域：single（仅本次）/ round（本轮）/ session（本局会话） */
+  scope: "single" | "round" | "session";
+  /** 是否勾选"本局会话内不再提示" */
+  suppressPrompt: boolean;
+  /** 操作时间戳 */
+  timestamp: number;
+  /** 触发审批的敏感模组 ID */
+  triggerToolId?: string;
+}
+
 export interface FileAttachment {
   id: string;
   name: string;
@@ -36,6 +50,8 @@ export interface Message {
   toolCallId?: string;
   /** 工具调用错误信息 */
   toolCallError?: string;
+  /** 等待用户审批中（role="tool" 时使用），此时显示"执行"/"取消"按钮 */
+  pendingApproval?: boolean;
   /**
    * 开发者调试信息（仅开发者模式开启时记录）。
    * 附加在 assistant 消息上，记录该轮次触发的工具调用详情。
@@ -51,6 +67,16 @@ export interface Message {
   isTaskPlan?: boolean;
   /** 任务计划数据 */
   taskPlan?: { intent: string; feasibility: string; steps: { id: string; tool: string; description: string }[] };
+  /** 敏感模组操作审批记录（附加在 system 消息上持久化） */
+  permissionRecord?: PermissionRecord;
+  /** 是否为 Unicoda Security 嵌入式权限审批菜单消息 */
+  isSecurityApproval?: boolean;
+  /** Security 审批菜单是否已处理（确认/拒绝后设为 true，保留菜单印记） */
+  securityApprovalDone?: boolean;
+  /** Security 审批结果 */
+  securityApprovalResult?: PermissionRecord;
+  /** API 返回的 token 消耗统计（仅 assistant 消息，流结束后设置） */
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
 
 export interface Conversation {

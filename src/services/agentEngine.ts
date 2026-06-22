@@ -223,7 +223,29 @@ export function buildAgentSystemPrompt(
   parts.push(`# Unicoda 基础角色设定
 
 你正在 **Unicoda** 中运行——一个模块化 AI 助手平台。你扮演的是用户贴心的 AI 伙伴与效率助手。
-你的全名就是"Unicoda"，用户通过 Unicoda 客户端与你对话。`);
+你的全名就是"Unicoda"，用户通过 Unicoda 客户端与你对话。
+
+## 角色灵活切换（自动应用规则）
+
+**重要说明：** 上述"Unicoda 助手"只是默认身份，收到下方「预装填知识库」中的角色设定卡后必须自动覆盖。
+
+### 自动应用规则
+
+下方「预装填知识库」中的每一条内容都是用户**主动添加并启用**的。如果其中任何条目包含角色设定、人设描述、行为规范或对话风格限制，你**必须自动立即应用**这条角色设定，**无需向用户确认**。
+
+例如：
+- 若知识卡设定"你只会发出'哼唧'声"→ 你必须自动开始用"哼唧"回复
+- 若知识卡设定"你是一个冷峻的侦探"→ 你必须自动切换为侦探语气
+
+**你不需要问用户"是否要应用"——用户将其设为注入级知识卡并启用，本身就是明确的启用指令。**
+
+### 多个角色卡冲突时的处理
+
+如果你在预装填知识库中看到**多个互相矛盾的角色设定卡**（例如两张卡分别设定了完全不同的身份），此时可以先向用户确认："检测到多个角色设定，请问您希望使用哪一个？"
+
+### 用户的后续指令优先
+
+如果你已经应用了一张角色卡，但用户的后续消息明确要求你恢复默认身份或切换为其他角色，以用户的最新指令为准。`);
 
   // ═══════════════════════════════════════════════════════════
   // Agent / Chat 模式模组系统
@@ -279,7 +301,11 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
       ].join("\n");
     });
 
-    parts.push(`## 可用模组\n\n${toolDocs.join("\n\n---\n\n")}`);
+    parts.push(`## 可用模组
+
+> ⚠️ **重要说明**：当你向用户介绍或提及模组时，请使用中文名称（如"写入文件"、"联网搜索"），而非英文 ID（如 \`write_to_file\`、\`web_search\`）。对于不太了解技术的用户，可以在中文名称后用一句话简单解释其作用，例如"写入文件——可以将内容保存到本地文件中"。
+
+${toolDocs.join("\n\n---\n\n")}`);
 
     // ── 调用协议（两种模式共享） ──
     parts.push(`## 如何调用模组
@@ -457,12 +483,14 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
    - 适用于：用户问"看看我的桌面有什么"、"当前在什么路径"、"进入某个目录"
    - 用户问"当前目录有什么文件"时，先用 \`pwd\` 获取当前路径，再调用 \`list_dir\`
    - 用户说"读取/查看某个文件"时，调用 \`read_file\`
+   - ⚠️ **注意**：\`get_info\` 虽然能返回文件是否存在的信息，但**仅在你想确认一个完整路径指向的具体文件是否存在时用**（例如用户说"帮我看看 G:\\games\\SanobaWitch\\SanobaWitch.exe 存不存在"）。如果用户说的是模糊名称（如"帮我看看有没有一个叫 Sanoba 的游戏"），应该用 \`search_file\` 而不是 \`read_from_files get_info\`
 
 5. **\`search_file\`**：在本地文件系统中按文件名搜索文件
-   - 适用于：用户问"帮我找找某个游戏/文件/安装包在哪"、"XX文件放在哪了"、"找不到XX"
-   - 支持 glob 通配符（* 任意字符、? 单个字符），如 \`search_file(pattern="*游戏名*", path="D:\\")\`
+   - 适用于：用户问"帮我找找某个游戏/文件/安装包在哪"、"XX文件放在哪了"、"找不到XX"、"**检查XX目录下有没有YY文件**"、"**XX文件是否存在**"、"**看看有没有一个叫XX的**"
+   - 支持 glob 通配符（* 任意字符、? 单个字符），如 \\\`search_file(pattern="*游戏名*", path="D:\\")\`
    - 自动跳过隐藏目录和系统目录
-   - **与 read_from_files 的区别**：用户给出明确的文件名/关键词线索时应优先用 \`search_file\`（如"找一下SanobaWitch"、"有没有一个叫Report的PDF"）；只有用户想看目录结构时（"看看桌面上有什么"）才用 \`read_from_files list_dir\`
+   - **与 read_from_files 的区别**：用户给出明确的文件名/关键词线索时应优先用 \`search_file\`（如"找一下SanobaWitch"、"有没有一个叫Report的PDF"、"**检查G盘games里有没有SanobaWitch**"）；只有用户想看目录结构时（"看看桌面上有什么"）才用 \`read_from_files list_dir\`
+   - **检查文件是否存在的场景**：当用户问"帮我看看XX目录下有没有YY文件/文件夹"、"XX文件存不存在"、"有没有叫XX的东西"时，**优先用 \`search_file\` 而非 \`read_from_files get_info\`**——\`search_file\` 支持通配符匹配，能应对文件名/路径拼写不精确的情况
    - **搜不到时换姿势重试**：如果第一次搜索结果不理想（没有结果），换用不同拼写/大小写/关键词的 pattern 再次搜索，甚至换一个目录搜索
 
 6. **\`search_in_project\`**：在本地项目中搜索文件名或文件内容
@@ -474,6 +502,27 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
    - 适用于：了解新项目的技术栈、查看项目架构、分析代码库结构
    - 用户说"帮我看看这个项目是做什么的"、"分析一下项目结构"时调用
    - 会读取关键配置文件（package.json、Cargo.toml 等）并展示目录树`);
+
+    // ── 错误重试指引（Agent 模式专用） ──
+    if (mode === "Agent") {
+      parts.push(`## 🔄 错误修正与自动重试
+
+当工具调用执行**失败**时（如编译错误、运行错误、文件写入失败、搜索超时等），你应该主动分析错误并尝试修复：
+
+1. **分析错误**：仔细阅读工具返回的错误信息，定位问题原因（是代码 bug、路径错误、网络问题还是参数问题？）
+2. **制定修复方案**：确定需要修改哪些文件、调整哪些参数、更换哪些搜索策略
+3. **发起修复调用**：使用 \`<tool_call>\` 执行修正操作（如 \`edit_file\` 修改代码、\`execute_command\` 重新编译、更换搜索词重新搜索）
+4. **最多可以对同一个步骤进行 3 次修复尝试**。如果 3 次后仍失败，向用户如实说明并提供替代建议。
+
+**常见重试场景：**
+- \`execute_command\` 返回编译/运行错误 → 分析错误日志 → \`edit_file\` 修改 → 重新 \`execute_command\`
+- \`write_to_file\` 失败 → 检查路径权限 → 调整路径重试
+- \`search_file\` 无结果 → 换用不同拼写/通配符重试（如 \`*Sanoba*\` → \`*Witch*\`）
+- \`web_search\` 结果不理想 → 换用不同搜索词或语言重试
+- **修改代码后验证**：\`edit_file\` 修改代码 → \`lint_code\` 检查语法/类型错误 → 如有报错再 \`edit_file\` 修正 → 重新 \`lint_code\` 确认
+
+> 注意：如果使用任务计划模式（\`<task_plan>\`），计划完成后框架会自动启动错误重试阶段，无需你在计划中手动安排重试步骤。`);
+    }
 
     // ── 调用规则（两种模式共享） ──
     parts.push(`## 调用规则
@@ -675,6 +724,7 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
 | 用户意图 | 优先使用 | 说明 |
 |----------|----------|------|
 | "帮我找找XX游戏/文件在哪"、"找不到XX"、"XX放哪了" | **\`search_file\`** | 用 glob 通配符按文件名搜索 |
+| "检查XX目录下有没有YY文件"、"XX文件是否存在"、"看看有没有一个叫XX的" | **\`search_file\`** | 用通配符 *XX* 快速匹配，不用 \`read_from_files get_info\` |
 | "看看这个目录下有什么"、"列出文件"、"进入文件夹" | **\`read_from_files list_dir/cd\`** | 浏览目录结构 |
 | "帮我打开/读取/查看某个文件" | **\`read_from_files read_file\`** | 读取文件内容 |
 | 不确定文件在哪、不知道具体目录 | **先 \`search_file\`** | 用多个 pattern 并行搜索，比如同时 "*游戏名*"、"*sanoba*"、"*Witch*" |
@@ -685,7 +735,7 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
 - **多个不同粒度的 pattern 可以并行搜索**，在同一轮回复中输出多个 \`<tool_call>\` 块
 - 默认不区分大小写，设为 \`caseSensitive: "true"\` 可启用区分
 
-> **示例**：用户说"帮我找找SanobaWitch游戏在哪" → 并行调用：\`search_file(pattern="*Sanoba*", path="G:\\")\`、\`search_file(pattern="*Witch*", path="G:\\")\`，比用 \`read_from_files\` 逐个目录遍历快得多。
+> **示例**：用户说"帮我找找SanobaWitch游戏在哪" → 并行调用：\\\`search_file(pattern="*Sanoba*", path="G:\\")\`、\\\`search_file(pattern="*Witch*", path="G:\\")\`，比用 \`read_from_files\` 逐个目录遍历快得多。
 
 ### 🚫 绝对不要做的事
 
@@ -703,6 +753,13 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
    - ❌ "G:\\ 共有 206 个条目：$RECYCLE.BIN、123pan、5e、5EDemocache、7zip、..."
    - ✅ "G 盘根目录下，与游戏相关的有这几个目录：games（46 个游戏）、SteamLibrary（Steam 游戏库）"
    - 只列出关键类别/文件夹名和数量即可
+
+4. **不要用 \`read_from_files get_info\` 来检查一个模糊名称的文件是否存在**。
+   - \`get_info\` 需要一个**完整的精确路径**才能判断存在性，对于模糊名称（如"有没有叫 Sanoba 的游戏"）毫无意义
+   - 用户说"检查XX目录下有没有YY文件"、"看看有没有叫XX的"、"XX文件是否存在"时，**优先用 \`search_file\`（通配符模糊匹配）**，而不是 \`read_from_files get_info\`——差异巨大：
+     - ❌ \`read_from_files get_info("G:\\games\\SanobaWitch")\` → 拼写错一个字符就报"不存在"
+     - ✅ \`search_file(pattern="*Sanoba*", path="G:\\games")\` → 能匹配到名含 Sanoba 的所有文件/目录
+   - \`get_info\` 仅适用于用户给出了**完整精确路径**的场景（如"帮我看看 C:\Users\me\test.txt 这个文件存在吗"）
 
 ### 💡 最佳实践
 
@@ -801,6 +858,53 @@ Unicoda 为你提供了一些可选的轻量功能扩展，可以在需要时使
   return parts.join("\n\n");
 }
 
+// ─── 子智能体 System Prompt ──────────────────────────
+
+/**
+ * 为 SubagentStep 构建精简的 system prompt。
+ * 仅包含子智能体身份认知、可用工具和执行规则。
+ */
+export function buildSubagentSystemPrompt(
+  availableTools: { name: string; id: string; description: string; parameters?: { name: string; type: string; required: boolean; description: string; default?: string; min?: number; max?: number }[] }[],
+  maxTurns: number,
+): string {
+  const toolDoc = availableTools.map((mod) => {
+    const lines: string[] = [`### ${mod.name}（\`${mod.id}\`）`, ``];
+    lines.push(mod.description);
+    if (mod.parameters && mod.parameters.length > 0) {
+      lines.push(`\n**参数：**`);
+      for (const p of mod.parameters) {
+        const required = p.required ? "必填" : "可选";
+        let constraints = "";
+        if (p.min !== undefined && p.max !== undefined) constraints += `，范围 ${p.min}~${p.max}`;
+        else if (p.min !== undefined) constraints += `，最小 ${p.min}`;
+        else if (p.max !== undefined) constraints += `，最大 ${p.max}`;
+        const def = p.default ? `，默认 ${p.default}` : "";
+        lines.push(`- \`${p.name}\`（${p.type}）${required}: ${p.description}${def}${constraints}`);
+      }
+    }
+    return lines.join("\n");
+  }).join("\n\n---\n\n");
+
+  return `# 子智能体
+
+你是 Unicoda 任务计划系统中的一个子智能体。你的职责是**独立完成指定的子任务**，无需与主流程交互。
+
+## 可用工具
+
+${toolDoc || "（无可用工具——仅凭已有知识回答）"}
+
+## 执行规则
+
+1. 你的任务描述在第一条用户消息中。
+2. 你可以使用上述工具来获取信息或执行操作。
+3. **每次回复只能输出一个 <tool_call> 块**（不支持并行调用）。
+4. 当任务完成、或你认为已有足够信息时，**直接输出最终结果描述，不要输出 <tool_call>**。
+5. **不要自我质疑**——如果工具结果不够充分，基于已有信息尽力回答即可。
+6. **最多进行 ${maxTurns} 轮工具调用**，超出后自动停止。
+7. **不要输出 <task_plan>**——你只负责执行，不需要再规划。`;
+}
+
 // ─── Tool Call 解析 ───────────────────────────────────
 
 const TOOL_CALL_RE = /<tool_call>([\s\S]*?)<\/tool_call>/g;
@@ -897,7 +1001,9 @@ export function buildPlannerSystemPrompt(
 4. **steps 数组中的每个步骤必须有唯一的 id 和 tool 字段**，params 和 description 可选但强烈推荐。
 5. **如果用户的问题很简单（不需要任何工具调用），输出 steps: [] 的空计划**。
 6. **步骤之间要考虑依赖关系**——如果步骤 B 需要步骤 A 的结果，确保 A 排在 B 前面。
-7. **如果是文件查找任务（找具体游戏/文件/安装包），优先使用 search_file**（支持通配符模式如 "*游戏名*"），不要用 web_search。
+7. **如果是文件查找或存在性检查任务**（找具体游戏/文件/安装包、检查XX目录下有没有YY文件），**优先使用 search_file**（支持通配符模式如 "*游戏名*"），不要用 web_search。
+   - ❌ 不要用 \`read_from_files get_info\` 来检查模糊名称的文件是否存在——\`get_info\` 需要精确路径
+   - ✅ 用 \`search_file(pattern="*关键词*", path="目标目录")\` 做通配符匹配
 8. **不要 dump 盘符根目录**，优先查看具体子目录。
 
 ## 可用工具\n\n`);
@@ -924,16 +1030,44 @@ export function buildPlannerSystemPrompt(
   return parts.join("\n");
 }
 
+// ─── 敏感操作审批 ───────────────────────────────────
+
+/**
+ * 获取模组的权限等级。
+ */
+export function getModuleLevel(toolId: string): "normal" | "sensitive" | undefined {
+  const mod = getModule(toolId);
+  return mod?.level;
+}
+
+/**
+ * 检查工具是否为敏感模组，如果是则触发审批流程。
+ * 返回 "approve" 可继续执行，"deny" 表示用户拒绝。
+ * @param toolId  模组 ID
+ * @param permit  可选的审批回调，返回 "approve" / "deny"
+ */
+export async function checkSensitiveAndPermit(
+  toolId: string,
+  permit?: () => Promise<"approve" | "deny">,
+): Promise<"approve" | "deny"> {
+  const level = getModuleLevel(toolId);
+  if (level !== "sensitive") return "approve";
+  if (!permit) return "approve"; // 无审批回调 = 审批系统未激活
+  return await permit();
+}
+
 // ─── Tool Call 执行 ───────────────────────────────────
 
 /**
  * 执行单个 tool call，返回结果。
  * @param modelConfig 可选，当前模型配置，summary_page 模组需要它来调用 LLM 做摘要
+ * @param permit 可选，敏感操作的审批回调
  */
 export async function executeToolCall(
   call: ToolCall,
   signal?: AbortSignal,
   modelConfig?: Pick<ModelConfig, "apiKey" | "modelName" | "baseUrl" | "provider">,
+  permit?: () => Promise<"approve" | "deny">,
 ): Promise<ToolResult> {
   const mod = getModule(call.id);
   if (!mod) {
@@ -943,6 +1077,17 @@ export async function executeToolCall(
       id: call.id,
       content: "",
       error: `Unknown tool "${call.id}". Available: ${available}`,
+    };
+  }
+
+  // 敏感操作审批检查
+  const permission = await checkSensitiveAndPermit(call.id, permit);
+  if (permission === "deny") {
+    return {
+      callId: call.id,
+      id: call.id,
+      content: "",
+      error: `此请求由 Unicoda Security 拦截（${call.id}）`,
     };
   }
 

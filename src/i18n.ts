@@ -241,6 +241,10 @@ const zh: Record<string, string> = {
   confirmDeleteKb: "确认删除此知识卡？",
   cardSaved: "知识卡已保存",
   cardDeleted: "知识卡已删除",
+  // Knowledge Base - Retrieval Type
+  kbRetrievalTypeLabel: "检索类型",
+  kbRetrievalType_inject: "注入",
+  kbRetrievalType_retrieve: "检索",
   // Compression
   compressionEnabled: "压缩上下文",
   compressionHint: "将早期对话压缩为摘要，保留最近对话完整内容",
@@ -338,6 +342,21 @@ const zh: Record<string, string> = {
   resetSettingsTopHint: "重置所有外观和行为设置为默认值。隐私（密码、锁定）和模型配置不受影响。",
   // Alpha Badge
   alphaTestBadge: "[Alpha 测试] 此版本不代表最终品质",
+  // Unicoda Security
+  securityService: "Unicoda Security",
+  securityServiceDesc: "安全服务开启后，Unicoda 会框架级监控所有敏感模组调用，在聊天界面中嵌入审批菜单供您决策。关闭后所有敏感操作将不受监管。",
+  securityEnabled: "启用 Unicoda Security",
+  securityDisabled: "Unicoda Security 未启用",
+  securityDisableConfirmTitle: "关闭 Unicoda Security",
+  securityDisableConfirm: "关闭后，Unicoda 将不再监控任何敏感模组调用，包括文件写入、命令执行等能力将不受限制地进行。\n\n您确认要关闭 Unicoda Security 吗？",
+  securityDisableConsent: "我已了解关闭 Unicoda Security 的风险，并对此承担全部责任。",
+  securityActive: "安全服务已启动",
+  securityApprovalTitle: "敏感操作确认 — {0}",
+  securityAllow: "允许",
+  securityDeny: "拒绝",
+  securityDenyRound: "拒绝本轮所有",
+  securityAutoAll: "授权全部",
+  securityApprovalRemember: "记住本次选择，本局不再次询问",
 };
 
 const en: Record<string, string> = {
@@ -529,6 +548,10 @@ const en: Record<string, string> = {
   confirmDeleteKb: "Delete this knowledge card?",
   cardSaved: "Card saved",
   cardDeleted: "Card deleted",
+  // Knowledge Base - Retrieval Type
+  kbRetrievalTypeLabel: "Retrieval Type",
+  kbRetrievalType_inject: "Inject",
+  kbRetrievalType_retrieve: "Retrieve",
   // Compression
   compressionEnabled: "Compress",
   compressionHint: "Compress early conversation into summary, keeping recent rounds intact",
@@ -626,6 +649,21 @@ const en: Record<string, string> = {
   resetSettingsTopHint: "Reset all appearance and behavior settings to their defaults. Privacy (password, lock) and model configurations are not affected.",
   // Alpha Badge
   alphaTestBadge: "[Alpha test] This version does not represent final quality",
+  // Unicoda Security
+  securityService: "Unicoda Security",
+  securityServiceDesc: "When enabled, Unicoda monitors all sensitive module calls at the framework level and embeds approval menus in the chat for your decisions. When disabled, all sensitive operations proceed without supervision.",
+  securityEnabled: "Enable Unicoda Security",
+  securityDisabled: "Unicoda Security is disabled",
+  securityDisableConfirmTitle: "Disable Unicoda Security",
+  securityDisableConfirm: "When disabled, Unicoda will no longer monitor any sensitive module calls — file writes, command execution, and other capabilities will proceed unrestrictedly.\n\nAre you sure you want to disable Unicoda Security?",
+  securityDisableConsent: "I understand the risks of disabling Unicoda Security and accept full responsibility.",
+  securityActive: "Security service is active",
+  securityApprovalTitle: "Sensitive Operation Approval — {0}",
+  securityAllow: "Allow",
+  securityDeny: "Deny",
+  securityDenyRound: "Deny all this round",
+  securityAutoAll: "Auto-approve all",
+  securityApprovalRemember: "Remember this choice for this session",
 };
 
 // ── 德语 ──
@@ -820,6 +858,10 @@ const de: Record<string, string> = {
   confirmDeleteKb: "Diese Wissenskarte löschen?",
   cardSaved: "Karte gespeichert",
   cardDeleted: "Karte gelöscht",
+  // Knowledge Base - Retrieval Type
+  kbRetrievalTypeLabel: "Abruftyp",
+  kbRetrievalType_inject: "Einspritzen",
+  kbRetrievalType_retrieve: "Abrufen",
   // Compression
   compressionEnabled: "Komprimieren",
   compressionHint: "Frühe Konversation in Zusammenfassung komprimieren, letzte Runden intakt lassen",
@@ -917,6 +959,21 @@ const de: Record<string, string> = {
   resetSettingsTopHint: "Setzt alle Darstellungs- und Verhaltenseinstellungen auf die Standardwerte zurück. Datenschutz (Passwort, Sperre) und Modellkonfigurationen bleiben erhalten.",
   // Alpha Badge
   alphaTestBadge: "[Alpha-Test] Diese Version stellt nicht die endgültige Qualität dar",
+  // Unicoda Security
+  securityService: "Unicoda Security",
+  securityServiceDesc: "Wenn aktiviert, überwacht Unicoda alle sensiblen Modulaufrufe auf Framework-Ebene und bettet Genehmigungsmenüs in den Chat ein. Wenn deaktiviert, werden alle sensiblen Vorgänge ohne Aufsicht ausgeführt.",
+  securityEnabled: "Unicoda Security aktivieren",
+  securityDisabled: "Unicoda Security ist deaktiviert",
+  securityDisableConfirmTitle: "Unicoda Security deaktivieren",
+  securityDisableConfirm: "Wenn deaktiviert, überwacht Unicoda keine sensiblen Modulaufrufe mehr — Dateischreibvorgänge, Befehlsausführung usw. werden uneingeschränkt ausgeführt.\n\nSind Sie sicher, dass Sie Unicoda Security deaktivieren möchten?",
+  securityDisableConsent: "Ich verstehe die Risiken der Deaktivierung von Unicoda Security und übernehme die volle Verantwortung.",
+  securityActive: "Sicherheitsdienst ist aktiv",
+  securityApprovalTitle: "Bestätigung sensibler Vorgang — {0}",
+  securityAllow: "Zulassen",
+  securityDeny: "Ablehnen",
+  securityDenyRound: "Diese Runde ablehnen",
+  securityAutoAll: "Alle genehmigen",
+  securityApprovalRemember: "Auswahl für diese Sitzung merken",
 };
 
 // ── 日语（最小字典，仅需在偏好语言中使用的键） ──

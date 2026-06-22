@@ -141,12 +141,14 @@ export default function PrintDialog({
   const [showModelInfo, setShowModelInfo] = useState(true);
   const [showUnisonInfo, setShowUnisonInfo] = useState(true);
   const [showAnchors, setShowAnchors] = useState(false);
+  const [showSecurityApproval, setShowSecurityApproval] = useState(true);
+  const [showTokenUsage, setShowTokenUsage] = useState(true);
 
-  // 默认全选所有 user 和 assistant 消息（跳过 tool 和 system，默认不选）
+  // 默认全选所有 user、assistant 和权限记录消息（跳过 tool 和普通 system）
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     for (const msg of messages) {
-      if (msg.role === "user" || msg.role === "assistant") {
+      if (msg.role === "user" || msg.role === "assistant" || msg.permissionRecord || msg.isSecurityApproval) {
         initial.add(msg.id);
       }
     }
@@ -211,12 +213,42 @@ export default function PrintDialog({
             month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
           });
           lines.push(`──── [${label}] ${ts} ────`);
+          // 标签：深度思考、工具调用、任务计划、安全审批
+          if (showReasoning && msg.reasoningContent) lines.push("【深度思考】");
+          if (msg.role === "tool" && msg.toolCallId) lines.push(`【工具调用】${msg.toolCallId}`);
+          if (msg.isTaskPlan) lines.push("【任务计划】");
+          if (msg.isSecurityApproval) {
+            const levelLabel = msg.securityApprovalDone
+              ? (msg.securityApprovalResult?.level === "deny_round" ? "已拒绝" : "已批准")
+              : "待审批";
+            lines.push(`【安全审批】${levelLabel} · ${msg.content}`);
+          }
           if (showReasoning && msg.reasoningContent) {
             lines.push(`[思考过程]`);
             lines.push(msg.reasoningContent);
           }
-          lines.push(msg.content);
+          // 工具调用拒绝/错误信息
+          if (msg.role === "tool") {
+            if (msg.toolCallError) {
+              lines.push(`[执行错误] ${msg.toolCallError}`);
+            } else if (msg.content) {
+              lines.push(msg.content);
+            } else {
+              lines.push("(空结果)");
+            }
+          } else {
+            lines.push(msg.content);
+          }
           lines.push("");
+        }
+        // Token 记录
+        if (showTokenUsage) {
+          const lastTokenMsg = messages.filter((m) => m.role === "assistant" && m.usage).pop();
+          if (lastTokenMsg?.usage) {
+            lines.push(`──── Token 记录 ────`);
+            lines.push(`输入：${lastTokenMsg.usage.prompt_tokens.toLocaleString()} · 输出：${lastTokenMsg.usage.completion_tokens.toLocaleString()} · 合计：${lastTokenMsg.usage.total_tokens.toLocaleString()} tokens`);
+            lines.push("");
+          }
         }
       } else {
         // md
@@ -235,21 +267,64 @@ export default function PrintDialog({
           });
           lines.push(`## ${label} — ${ts}`);
           lines.push("");
+          // 标签
+          const tags: string[] = [];
+          if (showReasoning && msg.reasoningContent) tags.push("深度思考");
+          if (msg.role === "tool" && msg.toolCallId) tags.push("工具调用");
+          if (msg.isTaskPlan) tags.push("任务计划");
+          if (msg.isSecurityApproval) {
+            const levelLabel = msg.securityApprovalDone
+              ? (msg.securityApprovalResult?.level === "deny_round" ? "已拒绝" : "已批准")
+              : "待审批";
+            tags.push(`安全审批(${levelLabel})`);
+          }
+          if (tags.length > 0) {
+            lines.push(`> **标签**：${tags.join(" · ")}`);
+            lines.push("");
+          }
           if (showReasoning && msg.reasoningContent) {
             lines.push("> **思考过程**");
             lines.push(`> ${msg.reasoningContent.replace(/\n/g, "\n> ")}`);
             lines.push("");
           }
-          lines.push(msg.content);
-          lines.push("");
+          // 工具调用错误/结果
+          if (msg.role === "tool") {
+            if (msg.toolCallError) {
+              lines.push(`> **错误**：${msg.toolCallError}`);
+              lines.push("");
+            } else if (msg.content) {
+              lines.push(msg.content);
+              lines.push("");
+            } else {
+              lines.push("_(空结果)_");
+              lines.push("");
+            }
+          } else {
+            lines.push(msg.content);
+            lines.push("");
+          }
           lines.push("---");
           lines.push("");
+        }
+        // Token 记录
+        if (showTokenUsage) {
+          const lastTokenMsg = messages.filter((m) => m.role === "assistant" && m.usage).pop();
+          if (lastTokenMsg?.usage) {
+            lines.push(`## Token 记录`);
+            lines.push("");
+            lines.push(`- **输入**：${lastTokenMsg.usage.prompt_tokens.toLocaleString()}`);
+            lines.push(`- **输出**：${lastTokenMsg.usage.completion_tokens.toLocaleString()}`);
+            lines.push(`- **合计**：${lastTokenMsg.usage.total_tokens.toLocaleString()} tokens`);
+            lines.push("");
+            lines.push("---");
+            lines.push("");
+          }
         }
       }
 
       return lines.join("\n");
     },
-    [messages, selectedIds, modelName, userName, hideToolCalls, hideDebugInfo, showReasoning],
+    [messages, selectedIds, modelName, userName, hideToolCalls, hideDebugInfo, showReasoning, showTokenUsage],
   );
 
   const handleExport = useCallback(
@@ -297,16 +372,17 @@ export default function PrintDialog({
     }
   }, []);
 
-  const allVisible = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  const allVisible = messages.filter((m) => m.role === "user" || m.role === "assistant" || m.permissionRecord || m.isSecurityApproval);
   const allSelected = allVisible.length > 0 && allVisible.every((m) => selectedIds.has(m.id));
   const selectedCount = selectedIds.size;
 
   // 根据设置过滤显示的消息（需在 toggleSelect 之前定义，避免 TDZ）
   const displayMessages = messages.filter((m) => {
-    if (m.role === "system") return false;
+    if (m.role === "system" && !m.permissionRecord && !m.isSecurityApproval) return false;
     if (m.role === "assistant" && (m.content.startsWith("[对话历史摘要]") || m.content.startsWith("[Conversation History Summary]"))) return false;
     if (hideToolCalls && m.role === "tool") return false;
     if (hideDebugInfo && m.role === "assistant" && m.toolDebugInfo && m.toolDebugInfo.length > 0) return false;
+    if (!showSecurityApproval && m.isSecurityApproval) return false;
     return true;
   });
 
@@ -525,9 +601,45 @@ export default function PrintDialog({
         const ts = new Date(msg.timestamp).toLocaleString("zh-CN", {
           month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
         });
-        const contentHtml = renderMarkdown
-          ? renderMarkdownToHtml(msg.content)
-          : escapeHtml(msg.content);
+        // 标签（消息头下面显示）
+        const tags: string[] = [];
+        if (showReasoning && msg.reasoningContent) tags.push('<span style="color:#3b82f6;font-weight:600">深度思考</span>');
+        if (msg.role === "tool" && msg.toolCallId) tags.push('<span style="color:#a78bfa;font-weight:600">工具调用</span>');
+        if (msg.isTaskPlan) tags.push('<span style="color:#818cf8;font-weight:600">任务计划</span>');
+        if (msg.isSecurityApproval) {
+          const done = msg.securityApprovalDone;
+          const isApproved = msg.securityApprovalResult?.level !== "deny_round";
+          const stateLabel = done ? (isApproved ? "已批准" : "已拒绝") : "待审批";
+          const color = !done ? "#f59e0b" : isApproved ? "#22c55e" : "#ef4444";
+          tags.push(`<span style="color:${color};font-weight:600">安全审批(${stateLabel})</span>`);
+        }
+        const tagsHtml = tags.length > 0
+          ? `<div style="font-size:9pt;margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap">${tags.join("")}</div>`
+          : "";
+        let contentHtml: string;
+        if (msg.role === "tool") {
+          if (msg.toolCallError) {
+            contentHtml = `<div style="color:#ef4444;font-size:11pt"><strong>[执行错误]</strong> ${escapeHtml(msg.toolCallError)}</div>`;
+          } else if (msg.content) {
+            contentHtml = renderMarkdown ? renderMarkdownToHtml(msg.content) : escapeHtml(msg.content);
+          } else {
+            contentHtml = '<span style="color:#888;font-style:italic">(空结果 — 已拒绝)</span>';
+          }
+        } else if (msg.isSecurityApproval) {
+          if (msg.securityApprovalDone && msg.securityApprovalResult) {
+            const r = msg.securityApprovalResult;
+            const isApproved = r.level !== "deny_round";
+            const scopeLabel = r.scope === "session" ? "本次会话" : r.scope === "round" ? "本轮" : "单次";
+            contentHtml = `<div style="font-size:11pt;color:${isApproved ? "#22c55e" : "#ef4444"}">` +
+              `<strong>${isApproved ? "已批准" : "已拒绝"}</strong> · ${r.level} · 范围：${scopeLabel}` +
+              (r.suppressPrompt ? " · 本局不再提示" : "") +
+              `</div>`;
+          } else {
+            contentHtml = escapeHtml(msg.content);
+          }
+        } else {
+          contentHtml = renderMarkdown ? renderMarkdownToHtml(msg.content) : escapeHtml(msg.content);
+        }
         let debugHtml = "";
         if (!hideDebugInfo && msg.toolDebugInfo && msg.toolDebugInfo.length > 0) {
           debugHtml = `<div class="print-debug-info"><strong>调试信息：</strong><pre>${escapeHtml(
@@ -549,6 +661,7 @@ export default function PrintDialog({
               <span class="print-role-label" style="color: ${roleColors[msg.role] || "#888"}">${escapeHtml(label)}</span>
               <span class="print-timestamp">${ts}</span>
             </div>
+            ${tagsHtml}
             ${reasoningHtml}
             <div class="print-content">${contentHtml}</div>
             ${debugHtml}
@@ -568,6 +681,17 @@ export default function PrintDialog({
     // ── 页脚许可证（固定显示） ──
     const footerHtml = `<div class="print-footer">Unicoda v0.1.0 | Designed by Momster | Apache 2.0 License | ${dateStr}</div>`;
 
+    // ── Token 记录 ──
+    let tokenHtml = "";
+    if (showTokenUsage) {
+      const lastTokenMsg = messages.filter((m) => m.role === "assistant" && m.usage).pop();
+      if (lastTokenMsg?.usage) {
+        tokenHtml = `<div style="text-align:center;padding:12px 0 4px;font-size:9pt;color:var(--c-t5,#888);font-family:monospace">
+          ↑ ${lastTokenMsg.usage.prompt_tokens.toLocaleString()} 输入 · ${lastTokenMsg.usage.completion_tokens.toLocaleString()} 输出 · 共计 ${lastTokenMsg.usage.total_tokens.toLocaleString()} tokens
+        </div>`;
+      }
+    }
+
     const printCss = getPrintStyles();
     const printHtml = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Unicoda 会话结果导出</title><style>${printCss}</style></head>
@@ -579,6 +703,7 @@ export default function PrintDialog({
   </div>
   ${tocHtml}
   ${messageHtml}
+  ${tokenHtml}
   ${footerHtml}
 </body></html>`;
 
@@ -607,7 +732,7 @@ export default function PrintDialog({
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => printWindow.print(), 300);
-  }, [messages, selectedIds, modelName, userName, hideToolCalls, hideDebugInfo, renderMarkdown, getPrintStyles, showReasoning, showModelInfo, showUnisonInfo, showAnchors]);
+  }, [messages, selectedIds, modelName, userName, hideToolCalls, hideDebugInfo, renderMarkdown, getPrintStyles, showReasoning, showModelInfo, showUnisonInfo, showAnchors, showTokenUsage, showSecurityApproval]);
 
   return (
     <div
@@ -816,6 +941,11 @@ export default function PrintDialog({
         <PrintSettingToggle checked={showModelInfo} onChange={() => setShowModelInfo((v) => !v)} label={t("showModelInfo")} />
         <PrintSettingToggle checked={showUnisonInfo} onChange={() => setShowUnisonInfo((v) => !v)} label={t("showUnisonInfo")} />
         <PrintSettingToggle checked={showAnchors} onChange={() => setShowAnchors((v) => !v)} label={t("showAnchors")} />
+
+        <span style={{ width: "1px", height: "18px", background: "var(--c-bd)", margin: "0 4px" }} />
+
+        <PrintSettingToggle checked={showSecurityApproval} onChange={() => setShowSecurityApproval((v) => !v)} label="安全审批" />
+        <PrintSettingToggle checked={showTokenUsage} onChange={() => setShowTokenUsage((v) => !v)} label="Token 记录" />
 
         <span style={{ flex: 1 }} />
 

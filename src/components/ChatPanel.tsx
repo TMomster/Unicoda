@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import type { Message } from "../types";
 import { useTheme } from "../contexts/ThemeContext";
 import MessageBubble from "./MessageBubble";
+import SecurityBubble from "./SecurityBubble";
 import AuroraLogo from "./AuroraLogo";
 
 interface Props {
@@ -175,9 +176,19 @@ export default function ChatPanel({
             padding: "0 24px",
           }}
         >
+          <SecurityBubble t={t} />
           {messages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo={yolo} onPreviewFile={onPreviewFile} />
           ))}
+          {(() => {
+            const lastUsage = messages.filter((m) => m.role === "assistant" && m.usage).pop()?.usage;
+            if (!lastUsage || isStreaming) return null;
+            return (
+              <div style={{ textAlign: "center", padding: "8px 0 4px", fontSize: "11px", color: "var(--c-t5)", userSelect: "none", fontFamily: "monospace" }}>
+                ↑ {lastUsage.prompt_tokens.toLocaleString()} 输入 · {lastUsage.completion_tokens.toLocaleString()} 输出 · 共计 {lastUsage.total_tokens.toLocaleString()} tokens
+              </div>
+            );
+          })()}
         </div>
       </div>
 

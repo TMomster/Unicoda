@@ -2,8 +2,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import ConfirmDialog from "./ConfirmDialog";
 import type { Conversation, Message, Mode, FileAttachment } from "../types";
 import { useTheme } from "../contexts/ThemeContext";
+import { useSecurity } from "../contexts/SecurityContext";
 import { useModels } from "../contexts/ModelContext";
-import { useChatStream, setNextMsgId } from "../hooks/useChatStream";
+import { useChatStream, setNextMsgId, type ChatStreamReturn } from "../hooks/useChatStream";
 import { hasCompressionSummary } from "../services/conversationCompression";
 import {
   loadMetadata, loadLiteralMessages, loadMemoryMessages,
@@ -541,6 +542,7 @@ interface Props { onBack?: () => void; }
 
 export default function YoloPanel({ onBack }: Props) {
   const { fontFamily, t, locale, preferredLanguage, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode } = useTheme();
+  const { securityEnabled } = useSecurity();
   const { models, selectedModelId } = useModels();
   const selectedModel = models.find((m) => m.id === selectedModelId);
 
@@ -664,8 +666,13 @@ export default function YoloPanel({ onBack }: Props) {
 
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
   const sessionPathRef = useRef(sessionPath);
   sessionPathRef.current = sessionPath;
+
+  // ref holds chatStream before its hook call, preventing TDZ in handleSelect
+  const chatStreamRef = useRef<ChatStreamReturn>(null!);
 
   const activeConv = conversations.find((c) => c.id === activeId) ?? null;
 
@@ -693,6 +700,7 @@ export default function YoloPanel({ onBack }: Props) {
 
   const handleSelect = useCallback((id: string) => {
     setActiveId(id);
+    chatStreamRef.current.resetPermissionRefs();
   }, []);
 
   const handleDelete = useCallback((id: string) => {
@@ -801,14 +809,19 @@ export default function YoloPanel({ onBack }: Props) {
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       flushTimerRef.current = setTimeout(async () => {
         flushTimerRef.current = null;
-        const activeConv = convs.find((c) => c.id === activeId) ?? null;
+        // 从 ref 读取最新 activeId，避免 debounce 闭包捕获过期值
+        const latestActiveId = activeIdRef.current;
+        const activeConv = convs.find((c) => c.id === latestActiveId) ?? null;
         const metas = convs.map(toMeta);
         await flushConversationData(activeConv, metas, "yolo", path);
         try { localStorage.setItem("unicoda-yolo-conversations-meta", JSON.stringify(metas)); } catch { /* ignore */ }
       }, 100);
     },
-    [activeId],
+    [], // 无依赖：所有需要的最新值通过 ref 读取
   );
+
+  // ── Security 审批流程（由 UnicodaSecurity 全权负责） ──
+  const securityMonitoring = securityEnabled;
 
   // ── Chat stream hook ──────────────────────────────
   const chatStream = useChatStream({
@@ -827,7 +840,9 @@ export default function YoloPanel({ onBack }: Props) {
     locale,
     flushConvs: flushConversations,
     withMsgUpdate,
+    securityMonitoring,
   });
+  chatStreamRef.current = chatStream;
 
   const handleSendWrapper = useCallback(
     (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
@@ -841,8 +856,15 @@ export default function YoloPanel({ onBack }: Props) {
   }, [chatStream.handleCompressNow, activeId]);
 
   // ── Ctrl+P Print Dialog ──
+  const handleCreateRef = useRef(handleCreate);
+  handleCreateRef.current = handleCreate;
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        handleCreateRef.current();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
         e.preventDefault();
         if (!activeConv) return;
@@ -960,7 +982,7 @@ export default function YoloPanel({ onBack }: Props) {
                 )}
               </div>
               {activeConv && (
-                <InputBar onSend={handleSendWrapper} onStop={chatStream.handleStop} disabled={chatStream.isStreaming} messages={activeConv.messages} memoryMessages={activeConv.memoryMessages ?? activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={chatStream.compressionEnabled} onToggleCompression={chatStream.handleToggleCompression} onCompressNow={handleCompressNowWrapper} isCompressing={chatStream.isCompressing} mode={mode} onModeChange={setMode} yolo preferredLanguage={preferredLanguage} pendingFiles={chatStream.pendingFiles} onRemovePendingFile={chatStream.handleRemovePendingFile} onClearPendingFiles={chatStream.clearPendingFiles} dragOver={chatStream.dragOver} />
+                <InputBar key={activeId} onSend={handleSendWrapper} onStop={chatStream.handleStop} disabled={chatStream.isStreaming} messages={activeConv.messages} memoryMessages={activeConv.memoryMessages ?? activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={chatStream.compressionEnabled} onToggleCompression={chatStream.handleToggleCompression} onCompressNow={handleCompressNowWrapper} isCompressing={chatStream.isCompressing} mode={mode} onModeChange={setMode} yolo preferredLanguage={preferredLanguage} pendingFiles={chatStream.pendingFiles} onRemovePendingFile={chatStream.handleRemovePendingFile} onClearPendingFiles={chatStream.clearPendingFiles} dragOver={chatStream.dragOver} />
               )}
             </div>
           </div>

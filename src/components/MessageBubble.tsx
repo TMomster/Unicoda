@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import type { Message } from "../types";
 import MarkdownRenderer from "./MarkdownRenderer";
+import { resolvePendingApproval, resolveSecurityApproval } from "../hooks/useChatStream";
+import type { PermissionRecord } from "../types";
 
 import type { FileAttachment } from "../types";
 
@@ -100,6 +102,220 @@ function CopyBtn({ text, yolo }: { text: string; yolo?: boolean }) {
         </svg>
       )}
     </button>
+  );
+}
+
+/**
+ * Unicoda Security 嵌入式审批卡片
+ * 当框架级感知到敏感模组调用且无已有审批策略时，在聊天中嵌入此菜单
+ */
+function SecurityApprovalCard({ toolName, t, yolo, done, result }: { toolName: string; t: (key: string) => string; yolo?: boolean; done?: boolean; result?: PermissionRecord }) {
+  const [selected, setSelected] = useState<"approve_all" | "auto_all" | "deny_round">("approve_all");
+  const [suppress, setSuppress] = useState(false);
+
+  const handleChoice = () => {
+    console.log("[SecurityApproval] 点击确认按钮, selected:", selected, "suppress:", suppress, "toolName:", toolName);
+    const scope: PermissionRecord["scope"] = suppress ? "session" : "round";
+    if (selected === "auto_all" || selected === "deny_round") {
+      resolveSecurityApproval({ level: selected, scope: suppress ? "session" : scope, suppressPrompt: suppress, timestamp: Date.now(), triggerToolId: toolName });
+    } else {
+      resolveSecurityApproval({ level: selected, scope, suppressPrompt: suppress, timestamp: Date.now(), triggerToolId: toolName });
+    }
+  };
+
+  const handleDenyOnce = () => {
+    console.log("[SecurityApproval] 点击拒绝按钮, toolName:", toolName);
+    resolveSecurityApproval({ level: "deny_round", scope: "round", suppressPrompt: false, timestamp: Date.now(), triggerToolId: toolName });
+  };
+
+  // 已确认状态：展示审批印记
+  if (done && result) {
+    const isApproved = result.level !== "deny_round";
+    const scopeLabel = result.scope === "session" ? "本次会话" : result.scope === "round" ? "本轮" : "单次";
+    const levelLabel = result.level === "approve_all" ? "允许" : result.level === "auto_all" ? "自动允许" : "拒绝";
+    return (
+      <div
+        style={{
+          borderRadius: "10px",
+          border: isApproved
+            ? (yolo ? "1px solid rgba(34,197,94,0.3)" : "1px solid rgba(34,197,94,0.4)")
+            : (yolo ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(239,68,68,0.4)"),
+          overflow: "hidden",
+          marginBottom: "4px",
+          opacity: 0.85,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "8px 12px",
+            background: isApproved
+              ? (yolo ? "rgba(34,197,94,0.06)" : "rgba(34,197,94,0.04)")
+              : (yolo ? "rgba(239,68,68,0.06)" : "rgba(239,68,68,0.04)"),
+            fontSize: "12px",
+            fontWeight: 600,
+            color: isApproved ? "#22c55e" : "#ef4444",
+            userSelect: "none",
+          }}
+        >
+          <span style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: isApproved ? "#22c55e" : "#ef4444", flexShrink: 0 }} />
+          Unicoda Security
+          <span style={{ color: yolo ? "rgba(255,255,255,0.25)" : "var(--c-t4)" }}>·</span>
+          <span style={{ fontWeight: 400, color: yolo ? "rgba(255,255,255,0.5)" : "var(--c-t3)" }}>
+            {isApproved ? "已批准" : "已拒绝"}
+          </span>
+        </div>
+        <div
+          style={{
+            padding: "8px 12px",
+            fontSize: "11px",
+            color: yolo ? "rgba(255,255,255,0.45)" : "var(--c-t4)",
+            borderTop: yolo ? "1px solid rgba(255,255,255,0.04)" : "1px solid var(--c-bd)",
+            userSelect: "none",
+          }}
+        >
+          {levelLabel} · 作用范围：{scopeLabel}{result.suppressPrompt ? " · 本局不再提示" : ""}
+        </div>
+      </div>
+    );
+  }
+
+  const btnBase: React.CSSProperties = {
+    flex: 1,
+    padding: "9px 0",
+    borderRadius: "8px",
+    border: "none",
+    fontSize: "12px",
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    lineHeight: 1.4,
+    transition: "all 0.15s",
+  };
+
+  return (
+    <div
+      style={{
+        borderRadius: "10px",
+        border: yolo ? "1px solid rgba(34,197,94,0.3)" : "1px solid var(--c-bd)",
+        overflow: "hidden",
+        marginBottom: "4px",
+      }}
+    >
+      {/* 头部 */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "10px 12px",
+          background: yolo ? "rgba(34,197,94,0.08)" : "rgba(34,197,94,0.06)",
+          fontSize: "12px",
+          fontWeight: 600,
+          color: "#22c55e",
+          userSelect: "none",
+        }}
+      >
+        <span style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: "#22c55e", flexShrink: 0 }} />
+        Unicoda Security
+        <span style={{ color: yolo ? "rgba(255,255,255,0.35)" : "var(--c-t3)" }}>·</span>
+        <span style={{ fontWeight: 400, color: yolo ? "rgba(255,255,255,0.6)" : "var(--c-t2)" }}>
+          {t("securityApprovalTitle").replace("{0}", toolName)}
+        </span>
+      </div>
+
+      {/* 策略选项 */}
+      <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+        <div
+          onClick={() => setSelected("approve_all")}
+          style={{
+            display: "flex", alignItems: "center", gap: "8px", cursor: "pointer",
+            padding: "7px 10px", borderRadius: "6px",
+            background: selected === "approve_all" ? (yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg3)") : "transparent",
+          }}
+        >
+          <div style={{
+            width: 14, height: 14, borderRadius: "50%", border: `2px solid ${selected === "approve_all" ? "#22c55e" : "var(--c-t4)"}`,
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            {selected === "approve_all" && <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#22c55e" }} />}
+          </div>
+          <span style={{ fontSize: "12px", color: "var(--c-txt)" }}>{t("securityAllow")}</span>
+        </div>
+        <div
+          onClick={() => setSelected("auto_all")}
+          style={{
+            display: "flex", alignItems: "center", gap: "8px", cursor: "pointer",
+            padding: "7px 10px", borderRadius: "6px",
+            background: selected === "auto_all" ? (yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg3)") : "transparent",
+          }}
+        >
+          <div style={{
+            width: 14, height: 14, borderRadius: "50%", border: `2px solid ${selected === "auto_all" ? "#22c55e" : "var(--c-t4)"}`,
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            {selected === "auto_all" && <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#22c55e" }} />}
+          </div>
+          <span style={{ fontSize: "12px", color: "var(--c-txt)" }}>{t("securityAutoAll")}</span>
+        </div>
+        <div
+          onClick={() => setSelected("deny_round")}
+          style={{
+            display: "flex", alignItems: "center", gap: "8px", cursor: "pointer",
+            padding: "7px 10px", borderRadius: "6px",
+            background: selected === "deny_round" ? (yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg3)") : "transparent",
+          }}
+        >
+          <div style={{
+            width: 14, height: 14, borderRadius: "50%", border: `2px solid ${selected === "deny_round" ? "#ef4444" : "var(--c-t4)"}`,
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            {selected === "deny_round" && <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#ef4444" }} />}
+          </div>
+          <span style={{ fontSize: "12px", color: "var(--c-txt)" }}>{t("securityDenyRound")}</span>
+        </div>
+      </div>
+
+      {/* 勾选"本局不再次询问" */}
+      <label
+        onClick={() => setSuppress(!suppress)}
+        style={{
+          display: "flex", alignItems: "center", gap: "6px", padding: "6px 12px", cursor: "pointer",
+          fontSize: "11px", color: "var(--c-t2)", userSelect: "none",
+        }}
+      >
+        <div style={{
+          width: 14, height: 14, borderRadius: "3px", border: `2px solid ${suppress ? "#22c55e" : "var(--c-t4)"}`,
+          background: suppress ? "#22c55e" : "transparent", flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.12s",
+        }}>
+          {suppress && <span style={{ color: "#fff", fontSize: "10px", lineHeight: 1 }}>✓</span>}
+        </div>
+        <span>{t("securityApprovalRemember")}</span>
+      </label>
+
+      {/* 操作按钮 */}
+      <div style={{ display: "flex", gap: "6px", padding: "8px 12px", borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid var(--c-bd)" }}>
+        <button
+          onClick={handleChoice}
+          style={{ ...btnBase, background: "linear-gradient(135deg, #22c55e, #16a34a)", color: "#fff" }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+        >
+          确认
+        </button>
+        <button
+          onClick={handleDenyOnce}
+          style={{ ...btnBase, background: "transparent", color: "var(--c-t3)", border: "1px solid var(--c-bd)" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--c-bg3)"; e.currentTarget.style.color = "var(--c-txt)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--c-t3)"; }}
+        >
+          拒绝
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -233,6 +449,11 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
             </button>
           )}
         </div>
+
+        {/* Unicoda Security 嵌入式权限审批菜单 */}
+        {message.isSecurityApproval && (
+          <SecurityApprovalCard toolName={message.content} t={t} yolo={yolo} done={message.securityApprovalDone} result={message.securityApprovalResult} />
+        )}
 
         {/* 思考过程（可折叠） */}
         {hasReasoning && (
@@ -476,6 +697,61 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                   <CopyBtn text={message.toolCallError || message.content} yolo={yolo} />
                 )}
               </div>
+              {/* 待审批按钮（"询问"模式） */}
+              {message.pendingApproval && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    padding: "8px 12px",
+                    borderTop: yolo ? "1px solid rgba(255,255,255,0.06)" : "1px solid var(--c-bd)",
+                    background: yolo ? "rgba(255,255,255,0.02)" : "var(--c-bg)",
+                  }}
+                >
+                  <button
+                    onClick={() => resolvePendingApproval("approve")}
+                    style={{
+                      flex: 1,
+                      padding: "8px 0",
+                      borderRadius: "8px",
+                      border: "none",
+                      background: "linear-gradient(135deg, #22c55e, #16a34a)",
+                      color: "#fff",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      lineHeight: 1.4,
+                      transition: "opacity 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+                  >
+                    执行
+                  </button>
+                  <button
+                    onClick={() => resolvePendingApproval("deny")}
+                    style={{
+                      flex: 1,
+                      padding: "8px 0",
+                      borderRadius: "8px",
+                      border: "1px solid var(--c-bd)",
+                      background: "transparent",
+                      color: "var(--c-txt)",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      lineHeight: 1.4,
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--c-bg3)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
               {/* 工具调用结果 — 可折叠，默认收起 */}
               {toolOpen && (
                 <div

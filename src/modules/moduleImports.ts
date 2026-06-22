@@ -24,3 +24,4 @@ import "./builtins/lintCode";
 import "./builtins/getUnicodaStatus";
 import "./builtins/getWorkspaceInfo";
 import "./builtins/editFile";
+import "./builtins/openPermissionDialog";
