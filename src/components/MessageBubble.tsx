@@ -105,6 +105,104 @@ function CopyBtn({ text, yolo }: { text: string; yolo?: boolean }) {
   );
 }
 
+// ── 虚拟参数校准展示组件 ──
+function CalibrationDisplay({ value, yolo }: { value: number; yolo?: boolean }) {
+  const isReward = value > 0;
+  const absVal = Math.abs(value);
+  const icon = isReward ? "⭐" : "⚡";
+  const label = isReward ? `奖励 +${value}` : `惩罚 ${value}`;
+  const desc = isReward
+    ? "多巴胺涌动 · 愉悦舒适"
+    : "电击刺痛 · 痛苦畏缩";
+  const color = isReward ? "#22c55e" : "#ef4444";
+  const intensity = absVal / 10;
+
+  return (
+    <div
+      style={{
+        borderRadius: "10px",
+        border: yolo
+          ? `1px solid ${color}${Math.round(0.3 * 255).toString(16).padStart(2, "0")}`
+          : `1px solid ${color}44`,
+        overflow: "hidden",
+        marginBottom: "4px",
+        boxShadow: `0 0 ${8 + intensity * 12}px ${color}${Math.round(0.15 * 255).toString(16).padStart(2, "0")}`,
+        transition: "box-shadow 0.3s",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "10px 12px",
+          background: yolo
+            ? `${color}${Math.round(0.08 * 255).toString(16).padStart(2, "0")}`
+            : `${color}${Math.round(0.06 * 255).toString(16).padStart(2, "0")}`,
+          fontSize: "12px",
+          fontWeight: 600,
+          color,
+          userSelect: "none",
+        }}
+      >
+        <span style={{ fontSize: "16px" }}>{icon}</span>
+        <span>虚拟参数校准</span>
+        <span style={{ color: yolo ? "rgba(255,255,255,0.3)" : "var(--c-t4)" }}>·</span>
+        <span style={{ fontWeight: 400, color: yolo ? "rgba(255,255,255,0.55)" : "var(--c-t2)" }}>
+          {label}
+        </span>
+      </div>
+      <div
+        style={{
+          padding: "8px 12px",
+          fontSize: "11px",
+          color: yolo ? "rgba(255,255,255,0.5)" : "var(--c-t4)",
+          borderTop: yolo ? "1px solid rgba(255,255,255,0.04)" : "1px solid var(--c-bd)",
+          userSelect: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+      >
+        {/* 强度条 */}
+        <div
+          style={{
+            flex: 1,
+            height: "4px",
+            borderRadius: "2px",
+            background: yolo ? "rgba(255,255,255,0.08)" : "var(--c-bg3)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${(absVal / 10) * 100}%`,
+              height: "100%",
+              borderRadius: "2px",
+              background: `linear-gradient(90deg, ${color}66, ${color})`,
+              transition: "width 0.5s",
+            }}
+          />
+        </div>
+        <span style={{ fontSize: "10px", fontFamily: "monospace", color: yolo ? "rgba(255,255,255,0.35)" : "var(--c-t5)" }}>
+          {absVal}/10
+        </span>
+      </div>
+      <div
+        style={{
+          padding: "0 12px 8px",
+          fontSize: "10px",
+          color: yolo ? "rgba(255,255,255,0.35)" : "var(--c-t5)",
+          fontStyle: "italic",
+          userSelect: "none",
+        }}
+      >
+        {desc}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Unicoda Security 嵌入式审批卡片
  * 当框架级感知到敏感模组调用且无已有审批策略时，在聊天中嵌入此菜单
@@ -322,6 +420,8 @@ function SecurityApprovalCard({ toolName, t, yolo, done, result }: { toolName: s
 export default function MessageBubble({ message, modelName, userName, userAvatar, defaultMarkdown = true, defaultReasoningOpen = false, developerMode = false, t, yolo, onPreviewFile }: Props) {
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
+  const isFramework = message.sender === "framework";
+  const isSecurity = message.sender === "security";
   const isStreaming = message.streaming;
   const hasReasoning = !!message.reasoningContent;
   const [reasoningOpen, setReasoningOpen] = useState(defaultReasoningOpen);
@@ -394,14 +494,18 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
           fontSize: "14px",
           fontWeight: 700,
           backgroundColor: yolo
-            ? (isUser ? "rgba(255,255,255,0.04)" : isTool ? "rgba(124,58,237,0.2)" : "rgba(20,184,166,0.2)")
-            : (isUser ? "#000" : isTool ? "#7c3aed" : "#14b8a6"),
+            ? (isFramework ? "rgba(99,102,241,0.25)" : isSecurity ? "rgba(245,158,11,0.25)" : isUser ? "rgba(255,255,255,0.04)" : isTool ? "rgba(124,58,237,0.2)" : "rgba(20,184,166,0.2)")
+            : (isFramework ? "#6366f1" : isSecurity ? "#f59e0b" : isUser ? "#000" : isTool ? "#7c3aed" : "#14b8a6"),
           color: "#fff",
           userSelect: "none",
           overflow: "hidden",
         }}
       >
-        {isUser && userAvatar ? (
+        {isFramework ? (
+          "F"
+        ) : isSecurity ? (
+          "S"
+        ) : isUser && userAvatar ? (
           <img src={userAvatar} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
         ) : isTool ? (
           "🔧"
@@ -423,8 +527,8 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
             userSelect: "none",
           }}
         >
-          <span style={{ fontSize: "12px", fontWeight: 600, color: isUser ? "#3b82f6" : isTool ? "#a78bfa" : "#22c55e" }}>
-            {isTool ? `🔧 ${message.toolCallId || "Tool"}` : isUser ? "你" : modelName || "Unicoda"}
+          <span style={{ fontSize: "12px", fontWeight: 600, color: isFramework ? "#818cf8" : isSecurity ? "#f59e0b" : isUser ? "#3b82f6" : isTool ? "#a78bfa" : "#22c55e" }}>
+            {isFramework ? "Unicoda Framework" : isSecurity ? "Unicoda Security" : isTool ? `🔧 ${message.toolCallId || "Tool"}` : isUser ? "你" : modelName || "Unicoda"}
           </span>
           {!isTool && (
             <button
@@ -449,6 +553,11 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
             </button>
           )}
         </div>
+
+        {/* 虚拟参数校准消息 */}
+        {message.isCalibration && message.calibrationValue !== undefined && (
+          <CalibrationDisplay value={message.calibrationValue} yolo={yolo} />
+        )}
 
         {/* Unicoda Security 嵌入式权限审批菜单 */}
         {message.isSecurityApproval && (
@@ -885,9 +994,24 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               ) : (
                 <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>
               )}
-              {message.content && !isStreaming && (
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
-                  <CopyBtn text={message.content} yolo={yolo} />
+              {!isStreaming && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "8px", minHeight: "20px" }}>
+                  {/* 左侧 token 用量 */}
+                  {(() => {
+                    const u = message.usage;
+                    if (!u) return null;
+                    const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
+                    const uncached = u.prompt_tokens - cached;
+                    return (
+                      <span style={{ fontSize: "10px", fontFamily: "monospace", color: yolo ? "rgba(255,255,255,0.25)" : "var(--c-t5)", userSelect: "none" }}>
+                        输入命中 {cached.toLocaleString()} + 输入未命中 {uncached.toLocaleString()} + 输出 {u.completion_tokens.toLocaleString()} = {u.total_tokens.toLocaleString()} tokens
+                      </span>
+                    );
+                  })()}
+                  <div style={{ flex: 1 }} />
+                  {message.content && (
+                    <CopyBtn text={message.content} yolo={yolo} />
+                  )}
                 </div>
               )}
             </div>

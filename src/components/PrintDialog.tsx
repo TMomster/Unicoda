@@ -148,7 +148,7 @@ export default function PrintDialog({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     for (const msg of messages) {
-      if (msg.role === "user" || msg.role === "assistant" || msg.permissionRecord || msg.isSecurityApproval) {
+      if (msg.role === "user" || msg.role === "assistant" || msg.permissionRecord || msg.isSecurityApproval || msg.isCalibration) {
         initial.add(msg.id);
       }
     }
@@ -217,6 +217,10 @@ export default function PrintDialog({
           if (showReasoning && msg.reasoningContent) lines.push("【深度思考】");
           if (msg.role === "tool" && msg.toolCallId) lines.push(`【工具调用】${msg.toolCallId}`);
           if (msg.isTaskPlan) lines.push("【任务计划】");
+          if (msg.isCalibration) {
+            const isReward = (msg.calibrationValue ?? 0) > 0;
+            lines.push(`【虚拟参数校准】${isReward ? "奖励" : "惩罚"} ${msg.calibrationValue}`);
+          }
           if (msg.isSecurityApproval) {
             const levelLabel = msg.securityApprovalDone
               ? (msg.securityApprovalResult?.level === "deny_round" ? "已拒绝" : "已批准")
@@ -272,6 +276,7 @@ export default function PrintDialog({
           if (showReasoning && msg.reasoningContent) tags.push("深度思考");
           if (msg.role === "tool" && msg.toolCallId) tags.push("工具调用");
           if (msg.isTaskPlan) tags.push("任务计划");
+          if (msg.isCalibration) tags.push(`虚拟参数校准(${msg.calibrationValue})`);
           if (msg.isSecurityApproval) {
             const levelLabel = msg.securityApprovalDone
               ? (msg.securityApprovalResult?.level === "deny_round" ? "已拒绝" : "已批准")
@@ -372,13 +377,13 @@ export default function PrintDialog({
     }
   }, []);
 
-  const allVisible = messages.filter((m) => m.role === "user" || m.role === "assistant" || m.permissionRecord || m.isSecurityApproval);
+  const allVisible = messages.filter((m) => m.role === "user" || m.role === "assistant" || m.permissionRecord || m.isSecurityApproval || m.isCalibration);
   const allSelected = allVisible.length > 0 && allVisible.every((m) => selectedIds.has(m.id));
   const selectedCount = selectedIds.size;
 
   // 根据设置过滤显示的消息（需在 toggleSelect 之前定义，避免 TDZ）
   const displayMessages = messages.filter((m) => {
-    if (m.role === "system" && !m.permissionRecord && !m.isSecurityApproval) return false;
+    if (m.role === "system" && !m.permissionRecord && !m.isSecurityApproval && !m.isCalibration) return false;
     if (m.role === "assistant" && (m.content.startsWith("[对话历史摘要]") || m.content.startsWith("[Conversation History Summary]"))) return false;
     if (hideToolCalls && m.role === "tool") return false;
     if (hideDebugInfo && m.role === "assistant" && m.toolDebugInfo && m.toolDebugInfo.length > 0) return false;
@@ -606,6 +611,10 @@ export default function PrintDialog({
         if (showReasoning && msg.reasoningContent) tags.push('<span style="color:#3b82f6;font-weight:600">深度思考</span>');
         if (msg.role === "tool" && msg.toolCallId) tags.push('<span style="color:#a78bfa;font-weight:600">工具调用</span>');
         if (msg.isTaskPlan) tags.push('<span style="color:#818cf8;font-weight:600">任务计划</span>');
+        if (msg.isCalibration) {
+          const isReward = (msg.calibrationValue ?? 0) > 0;
+          tags.push(`<span style="color:${isReward ? "#22c55e" : "#ef4444"};font-weight:600">虚拟参数校准(${msg.calibrationValue})</span>`);
+        }
         if (msg.isSecurityApproval) {
           const done = msg.securityApprovalDone;
           const isApproved = msg.securityApprovalResult?.level !== "deny_round";
@@ -625,6 +634,20 @@ export default function PrintDialog({
           } else {
             contentHtml = '<span style="color:#888;font-style:italic">(空结果 — 已拒绝)</span>';
           }
+        } else if (msg.isCalibration) {
+          const isReward = (msg.calibrationValue ?? 0) > 0;
+          const absVal = Math.abs(msg.calibrationValue ?? 0);
+          const desc = isReward ? "多巴胺涌动 · 愉悦舒适" : "电击刺痛 · 痛苦畏缩";
+          const color = isReward ? "#22c55e" : "#ef4444";
+          contentHtml = `<div style="text-align:center;padding:4px 0">
+            <div style="font-size:18pt;margin-bottom:4px">${isReward ? "⭐" : "⚡"}</div>
+            <div style="font-size:11pt;font-weight:600;color:${color}">${isReward ? "奖励" : "惩罚"} ${msg.calibrationValue}</div>
+            <div style="font-size:10pt;color:#888;margin-top:4px;font-style:italic">${desc}</div>
+            <div style="margin-top:8px;height:3px;border-radius:2px;background:#eee;max-width:200px;margin-left:auto;margin-right:auto;overflow:hidden">
+              <div style="width:${(absVal / 10) * 100}%;height:100%;border-radius:2px;background:linear-gradient(90deg,${color}66,${color})"></div>
+            </div>
+            <div style="font-size:9pt;color:#aaa;margin-top:2px;font-family:monospace">${absVal}/10</div>
+          </div>`;
         } else if (msg.isSecurityApproval) {
           if (msg.securityApprovalDone && msg.securityApprovalResult) {
             const r = msg.securityApprovalResult;

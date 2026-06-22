@@ -12,6 +12,8 @@ export interface TokenUsage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  /** OpenAI 式 prompt 详细分解（如缓存命中） */
+  prompt_tokens_details?: { cached_tokens?: number };
 }
 
 export interface StreamChunk {
@@ -186,7 +188,13 @@ export async function* streamChatCompletion(
         const delta = choice?.delta;
         const content = delta?.content ?? choice?.text ?? "";
         const reasoningContent = delta?.reasoning_content ?? "";
-        const usage = parsed.usage ? { prompt_tokens: parsed.usage.prompt_tokens, completion_tokens: parsed.usage.completion_tokens, total_tokens: parsed.usage.total_tokens } : undefined;
+        const rawUsage = parsed.usage;
+        const usage: TokenUsage | undefined = rawUsage ? {
+          prompt_tokens: rawUsage.prompt_tokens,
+          completion_tokens: rawUsage.completion_tokens,
+          total_tokens: rawUsage.total_tokens,
+          prompt_tokens_details: rawUsage.prompt_tokens_details ? { cached_tokens: rawUsage.prompt_tokens_details.cached_tokens } : undefined,
+        } : undefined;
         if (content || reasoningContent || usage) yield { content, reasoningContent, usage };
       } catch {
         // 跳过格式异常的 SSE 行
