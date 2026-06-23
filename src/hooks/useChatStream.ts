@@ -11,7 +11,7 @@ import type { Conversation, FileAttachment, Message, Mode, ModelConfig, PanelMod
 import { streamChatCompletion } from "../services/modelApi";
 import { buildAgentSystemPrompt, buildPlannerSystemPrompt, parseToolCalls, stripToolCalls, executeToolCall, type ToolCall, type ToolResult } from "../services/agentEngine";
 import { parseTaskPlan, executeTaskPlan, type TaskPlan, type StepResult } from "../services/taskPlanner";
-import { compressConversation, MIN_MESSAGES_FOR_COMPRESSION, hasCompressionSummary } from "../services/conversationCompression";
+import { compressConversation, KEEP_ROUNDS, MIN_MESSAGES_FOR_COMPRESSION, hasCompressionSummary } from "../services/conversationCompression";
 import { parseCommand, getCommand, type CommandResult } from "../services/commandSystem";
 import { playNotificationSound } from "../utils/notificationSound";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -1236,6 +1236,23 @@ ${errorContext}
       // 注入命令返回的额外消息（如校准消息），确保 buildApiMessages 能读取
       if (commandResult?.messagesToInject && commandResult.messagesToInject.length > 0) {
         prevMessages = [...commandResult.messagesToInject, ...prevMessages];
+      }
+
+      // ── 自动压缩：开启压缩且会话过长时自动压缩 memoryMessages ──
+      if (compressionEnabled && selectedModel && prevMessages.length >= MIN_MESSAGES_FOR_COMPRESSION && !isCompressing) {
+        try {
+          const result = await compressConversation(prevMessages, selectedModel, KEEP_ROUNDS, abortController.signal);
+          if (result.summary) {
+            prevMessages = result.messages;
+            updateConv(activeId, (c) => ({
+              ...c,
+              memoryMessages: result.messages,
+              updatedAt: Date.now(),
+            }));
+          }
+        } catch {
+          // 压缩失败不影响发送
+        }
       }
 
       const needsAutoTitle = currentConv

@@ -6,7 +6,7 @@
  * - 浏览器自动管理 HTTP 连接复用（HTTP/1.1 Keep-Alive / HTTP/2 多路复用）
  * - 整个过程完全透明，不对用户暴露任何 UI 或操作提示
  */
-import type { ModelConfig } from "../types";
+import type { Message, ModelConfig } from "../types";
 
 export interface TokenUsage {
   prompt_tokens: number;
@@ -59,8 +59,9 @@ export async function* streamChatCompletion(
   }
 
   // 构造消息列表：如果上层未提供 system 消息且有 systemPrompt，则补齐
+  // 过滤掉 isRatingEval 消息，防止评价系统消息顶替真正的系统提示词
   const chatMessages: { role: string; content: string }[] = [];
-  const alreadyHasSystem = messages.some((m) => m.role === "system");
+  const alreadyHasSystem = messages.some((m) => m.role === "system" && !(m as Message).isRatingEval);
   if (model.systemPrompt && !alreadyHasSystem) {
     chatMessages.push({ role: "system", content: model.systemPrompt });
   }

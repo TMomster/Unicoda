@@ -10,10 +10,10 @@ import type { Message, ModelConfig } from "../types";
 import { streamChatCompletion } from "./modelApi";
 
 /** 压缩时保留的最近完整轮数（1 轮 = 1 user + 1 assistant） */
-export const KEEP_ROUNDS = 8;
+export const KEEP_ROUNDS = 20;
 
 /** 需要压缩的最小消息数，低于此数无需压缩 */
-export const MIN_MESSAGES_FOR_COMPRESSION = KEEP_ROUNDS * 2 + 2; // 18
+export const MIN_MESSAGES_FOR_COMPRESSION = KEEP_ROUNDS * 2 + 2; // 42
 
 export interface CompressionResult {
   /** 压缩后的消息数组 */
@@ -53,9 +53,15 @@ export async function compressConversation(
     {
       role: "system",
       content:
-        "Compress the following conversation into a concise summary (200 words or less), " +
-        "preserving all key information: user's requirements, solutions/code provided, and decisions made.\n" +
-        "Output only the summary text, without any prefixes or explanations.",
+        "Compress the following conversation into a detailed summary (under 500 words). " +
+        "Preserve ALL of the following:\n" +
+        "- User's requirements, preferences, and customized instructions\n" +
+        "- Persona/character settings requested by the user\n" +
+        "- Key decisions, agreements, and changes in direction\n" +
+        "- Code solutions: languages, frameworks, libraries, approaches used\n" +
+        "- Important facts, names, numbers, or references discussed\n" +
+        "- User feedback or rating (satisfied/dissatisfied) on responses\n" +
+        "Output only the summary text, organized in clear sections.",
     },
     ...oldMessages.map((m) => ({ role: m.role, content: m.content })),
   ];

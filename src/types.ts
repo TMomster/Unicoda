@@ -82,7 +82,11 @@ export interface Message {
   /** 校准值：正数为奖励，负数为惩罚 */
   calibrationValue?: number;
   /** 消息发送方标识，用于区分不同系统账号的消息 */
-  sender?: "user" | "assistant" | "framework" | "security";
+  sender?: "user" | "assistant" | "framework" | "security" | "system";
+  /** 用户对模型回复的评价（点赞/点踩），由用户点击后设置 */
+  userRating?: "up" | "down";
+  /** 是否为评价系统消息（显示在对话中的评价记录） */
+  isRatingEval?: boolean;
 }
 
 export interface Conversation {

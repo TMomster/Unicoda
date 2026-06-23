@@ -25,3 +25,5 @@ import "./builtins/getUnicodaStatus";
 import "./builtins/getWorkspaceInfo";
 import "./builtins/editFile";
 import "./builtins/openPermissionDialog";
+import "./builtins/virtualParameterCalibration";
+import "./builtins/systemMessageFlow";

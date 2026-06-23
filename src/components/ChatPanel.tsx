@@ -18,6 +18,8 @@ interface Props {
   yolo?: boolean;
   /** 点击文件附件时回调 */
   onPreviewFile?: (file: import("../types").FileAttachment) => void;
+  /** 用户对消息评价回调（点赞/点踩） */
+  onRate?: (messageId: string, rating: "up" | "down") => void;
   /** 模型正在生成中 */
   isStreaming?: boolean;
 }
@@ -112,6 +114,7 @@ export default function ChatPanel({
   t,
   yolo,
   onPreviewFile,
+  onRate,
   isStreaming,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -178,7 +181,7 @@ export default function ChatPanel({
         >
           <SecurityBubble t={t} />
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo={yolo} onPreviewFile={onPreviewFile} />
+            <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo={yolo} onPreviewFile={onPreviewFile} onRate={onRate} />
           ))}
           {(() => {
             const lastUsage = messages.filter((m) => m.role === "assistant" && m.usage).pop()?.usage;

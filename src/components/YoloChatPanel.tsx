@@ -13,6 +13,8 @@ interface Props {
   developerMode?: boolean;
   t: (key: string) => string;
   onPreviewFile?: (file: FileAttachment) => void;
+  /** 用户对消息评价回调（点赞/点踩） */
+  onRate?: (messageId: string, rating: "up" | "down") => void;
   /** 模型正在生成中 */
   isStreaming?: boolean;
 }
@@ -33,6 +35,7 @@ export default function YoloChatPanel({
   developerMode,
   t,
   onPreviewFile,
+  onRate,
   isStreaming,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -100,6 +103,7 @@ export default function YoloChatPanel({
               t={t}
               yolo
               onPreviewFile={onPreviewFile}
+              onRate={onRate}
             />
           ))}
           {(() => {

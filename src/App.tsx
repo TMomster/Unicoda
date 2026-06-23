@@ -477,6 +477,109 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     chatStream.handleCompressNow(activeId);
   }, [chatStream.handleCompressNow, activeId]);
 
+  /** 用户对模型回复评价（点赞/点踩，null 取消评价） */
+  const handleRateMessage = useCallback(
+    (messageId: string, rating: "up" | "down" | null) => {
+      if (!activeId) return;
+      const pathRef = sessionPathRef.current;
+      setConversations((prev) => {
+        const conv = prev.find((c) => c.id === activeId);
+        if (!conv) return prev;
+
+        const msgs = conv.messages;
+        const idx = msgs.findIndex((m) => m.id === messageId);
+        if (idx === -1) return prev;
+
+        const nextMsg = msgs[idx + 1];
+        let updatedConv: Conversation;
+
+        if (rating === null) {
+          // 取消评价：清除 userRating，移除后面的评价消息
+          const updatedMsg = { ...msgs[idx], userRating: undefined };
+          if (nextMsg?.isRatingEval) {
+            updatedConv = withMsgUpdate(conv, (all) => {
+              const copy = [...all];
+              copy[idx] = updatedMsg;
+              copy.splice(idx + 1, 1);
+              return copy;
+            });
+          } else {
+            updatedConv = withMsgUpdate(conv, (all) => {
+              const copy = [...all];
+              copy[idx] = updatedMsg;
+              return copy;
+            });
+          }
+        } else {
+          // 设置评价
+          const updatedMsg = { ...msgs[idx], userRating: rating };
+          const evalContent = rating === "up"
+            ? "【用户评价反馈】用户对上一条回复的评价为：满意。这是系统记录的客观反馈，模型应将其作为调整回复风格的重要依据。"
+            : "【用户评价反馈】用户对上一条回复的评价为：不满意。这是系统记录的客观反馈，模型应将其作为调整回复风格的重要依据。";
+
+          if (nextMsg?.isRatingEval) {
+            // 已有评价消息 → 更新内容
+            const updatedEval = { ...nextMsg, content: evalContent };
+            updatedConv = withMsgUpdate(conv, (all) =>
+              all.map((m, i) => (i === idx ? updatedMsg : i === idx + 1 ? updatedEval : m)),
+            );
+          } else {
+            // 没有评价消息 → 插入新消息
+            const evalMsg: Message = {
+              id: `eval-${messageId}-${rating}-${Date.now()}`,
+              role: "system",
+              sender: "framework",
+              content: evalContent,
+              timestamp: Date.now(),
+              isRatingEval: true,
+            };
+            updatedConv = withMsgUpdate(conv, (all) => {
+              const copy = [...all];
+              copy[idx] = updatedMsg;
+              copy.splice(idx + 1, 0, evalMsg);
+              return copy;
+            });
+          }
+        }
+
+        const updated = prev.map((c) => (c.id === activeId ? updatedConv : c));
+        flushConversations(updated, pathRef);
+        return updated;
+      });
+    },
+    [activeId, withMsgUpdate, flushConversations],
+  );
+
+  /** 撤回本轮消息：从该轮用户消息开始到末尾全部清除 */
+  const handleRecallMessage = useCallback(
+    (messageId: string) => {
+      if (!activeId) return;
+      const pathRef = sessionPathRef.current;
+      setConversations((prev) => {
+        const conv = prev.find((c) => c.id === activeId);
+        if (!conv) return prev;
+        const msgs = conv.messages;
+        const recallIdx = msgs.findIndex((m) => m.id === messageId);
+        if (recallIdx === -1) return prev;
+        // 向前找本轮用户消息起点
+        let removeStartIdx = -1;
+        for (let i = recallIdx; i >= 0; i--) {
+          if (msgs[i].role === "user") {
+            removeStartIdx = i;
+            break;
+          }
+        }
+        if (removeStartIdx === -1) return prev;
+        // 从用户消息截断到末尾
+        const updatedConv = withMsgUpdate(conv, (all) => all.slice(0, removeStartIdx));
+        const updated = prev.map((c) => (c.id === activeId ? updatedConv : c));
+        flushConversations(updated, pathRef);
+        return updated;
+      });
+    },
+    [activeId, withMsgUpdate, flushConversations],
+  );
+
   // Clamp sidebar on window resize
   useEffect(() => {
     const clamp = () => {
@@ -707,7 +810,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             >
               {/* Messages */}
               {activeConv ? (
-                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} isStreaming={chatStream.isStreaming} />
+                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} onRate={handleRateMessage} onRecall={handleRecallMessage} isStreaming={chatStream.isStreaming} />
               ) : (
                 <div
                   style={{

@@ -19,6 +19,16 @@ interface Props {
   yolo?: boolean;
   /** 点击文件附件预览回调 */
   onPreviewFile?: (file: FileAttachment) => void;
+  /** 用户对消息评价回调（点赞/点踩，null 表示取消评价） */
+  onRate?: (messageId: string, rating: "up" | "down" | null) => void;
+  /** 撤回本轮消息回调 */
+  onRecall?: (messageId: string) => void;
+  /** 是否为当前对话中最后一条 assistant 消息（VoteBtn 仅在此显示） */
+  isLastAssistant?: boolean;
+  /** 是否为某一轮的结束消息（RecallBtn 在此显示） */
+  isRoundEnd?: boolean;
+  /** 是否为最新一轮（非最新轮 RecallBtn 变红 + 确认气泡） */
+  isLatestRound?: boolean;
 }
 
 const animations = `
@@ -102,6 +112,90 @@ function CopyBtn({ text, yolo }: { text: string; yolo?: boolean }) {
         </svg>
       )}
     </button>
+  );
+}
+
+// ── 点赞/点踩按钮组件 ──
+function VoteBtn({
+  rating,
+  onRate,
+  yolo,
+}: {
+  rating?: "up" | "down";
+  onRate?: (rating: "up" | "down" | null) => void;
+  yolo?: boolean;
+}) {
+  // "cleared" 表示用户手动取消了评价
+  const [selected, setSelected] = useState<"up" | "down" | "cleared">("cleared");
+
+  // 当前生效的评价：用户手动操作优先，否则用持久化的 rating
+  const active = selected === "cleared" ? rating : selected;
+
+  const handleVote = (vote: "up" | "down") => {
+    if (active === vote) {
+      // 点击已选中项 → 取消评价
+      setSelected("cleared");
+      onRate?.(null);
+    } else {
+      setSelected(vote);
+      onRate?.(vote);
+    }
+  };
+
+  const btnStyle = (vote: "up" | "down"): React.CSSProperties => ({
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    padding: "2px 4px",
+    fontSize: "14px",
+    lineHeight: 1,
+    color:
+      active === vote
+        ? vote === "up"
+          ? "#22c55e"
+          : "#ef4444"
+        : yolo
+          ? "rgba(255,255,255,0.25)"
+          : "var(--c-t5)",
+    userSelect: "none",
+    transition: "color 0.15s, transform 0.12s",
+    flexShrink: 0,
+    opacity: active === vote ? 1 : 0.5,
+  });
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "2px" }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); handleVote("up"); }}
+        style={btnStyle("up")}
+        title="好评"
+        onMouseEnter={(e) => {
+          if (active !== "up") { e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.5)" : "var(--c-t3)"; e.currentTarget.style.opacity = "1"; }
+        }}
+        onMouseLeave={(e) => {
+          if (active !== "up") { e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.25)" : "var(--c-t5)"; e.currentTarget.style.opacity = "0.5"; }
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+        </svg>
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); handleVote("down"); }}
+        style={btnStyle("down")}
+        title="差评"
+        onMouseEnter={(e) => {
+          if (active !== "down") { e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.5)" : "var(--c-t3)"; e.currentTarget.style.opacity = "1"; }
+        }}
+        onMouseLeave={(e) => {
+          if (active !== "down") { e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.25)" : "var(--c-t5)"; e.currentTarget.style.opacity = "0.5"; }
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+        </svg>
+      </button>
+    </span>
   );
 }
 
@@ -417,7 +511,161 @@ function SecurityApprovalCard({ toolName, t, yolo, done, result }: { toolName: s
   );
 }
 
-export default function MessageBubble({ message, modelName, userName, userAvatar, defaultMarkdown = true, defaultReasoningOpen = false, developerMode = false, t, yolo, onPreviewFile }: Props) {
+// ── Unicoda Framework 消息卡片（嵌入栏风格，类似 Security） ──
+function FrameworkCard({ content, yolo }: { content: string; yolo?: boolean }) {
+  const isUp = content.includes("满意") && !content.includes("不满意");
+  const color = isUp ? "#22c55e" : "#ef4444";
+  return (
+    <div
+      style={{
+        borderRadius: "8px",
+        border: yolo
+          ? `1px solid ${color}${Math.round(0.3 * 255).toString(16).padStart(2, "0")}`
+          : `1px solid ${color}44`,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "8px 12px",
+          fontSize: "12px",
+          fontWeight: 600,
+          userSelect: "none",
+          color,
+          background: yolo
+            ? `${color}${Math.round(0.06 * 255).toString(16).padStart(2, "0")}`
+            : `${color}${Math.round(0.04 * 255).toString(16).padStart(2, "0")}`,
+        }}
+      >
+        {isUp ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+          </svg>
+        )}
+        <span style={{ color: yolo ? "rgba(255,255,255,0.55)" : "var(--c-t3)", fontWeight: 400 }}>
+          {isUp ? "满意" : "不满意"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── 撤回按钮组件 ──
+function RecallBtn({ onRecall, yolo, danger }: { onRecall: () => void; yolo?: boolean; danger?: boolean }) {
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (danger) {
+      if (showConfirm) {
+        setShowConfirm(false);
+      } else {
+        setShowConfirm(true);
+      }
+    } else {
+      onRecall();
+    }
+  };
+
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }}>
+      {showConfirm && danger && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "100%",
+            right: 0,
+            marginBottom: "6px",
+            background: "#ef4444",
+            borderRadius: "6px",
+            padding: "6px 10px",
+            fontSize: "11px",
+            color: "#fff",
+            whiteSpace: "nowrap",
+            zIndex: 100,
+            lineHeight: 1.4,
+            boxShadow: "0 2px 10px rgba(239,68,68,0.5)",
+          }}
+        >
+          警告：此节点之后的所有对话都会被撤回
+          <span
+            style={{
+              fontWeight: 700,
+              cursor: "pointer",
+              marginLeft: "4px",
+              textDecoration: "underline",
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowConfirm(false);
+              onRecall();
+            }}
+          >[是]</span>
+          {/* 三角箭头 ↓ */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: "-4px",
+              right: "14px",
+              width: 0,
+              height: 0,
+              borderLeft: "5px solid transparent",
+              borderRight: "5px solid transparent",
+              borderTop: "5px solid #ef4444",
+            }}
+          />
+        </div>
+      )}
+      <button
+        onClick={handleClick}
+        style={{
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          padding: "2px 4px",
+          fontSize: "14px",
+          lineHeight: 1,
+          color: danger ? "#ef4444" : yolo ? "rgba(255,255,255,0.25)" : "var(--c-t5)",
+          userSelect: "none",
+          transition: "color 0.15s, opacity 0.15s",
+          flexShrink: 0,
+          opacity: danger ? 0.7 : 0.5,
+        }}
+        title={danger ? "撤回本轮（历史对话）" : "撤回本轮"}
+        onMouseEnter={(e) => {
+          if (danger) {
+            e.currentTarget.style.opacity = "1";
+          } else {
+            e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.5)" : "var(--c-t3)";
+            e.currentTarget.style.opacity = "1";
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (danger) {
+            e.currentTarget.style.opacity = "0.7";
+          } else {
+            e.currentTarget.style.color = yolo ? "rgba(255,255,255,0.25)" : "var(--c-t5)";
+            e.currentTarget.style.opacity = "0.5";
+          }
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 14 4 9 9 4" />
+          <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+        </svg>
+      </button>
+    </span>
+  );
+}
+
+export default function MessageBubble({ message, modelName, userName, userAvatar, defaultMarkdown = true, defaultReasoningOpen = false, developerMode = false, t, yolo, onPreviewFile, onRate, onRecall, isLastAssistant, isRoundEnd, isLatestRound }: Props) {
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
   const isFramework = message.sender === "framework";
@@ -987,6 +1235,8 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
                 </div>
               )}
             </div>
+          ) : isFramework ? (
+            <FrameworkCard content={message.content} yolo={yolo} />
           ) : (
             <div>
               {useMarkdown ? (
@@ -997,21 +1247,31 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               {!isStreaming && (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "8px", minHeight: "20px" }}>
                   {/* 左侧 token 用量 */}
-                  {(() => {
-                    const u = message.usage;
-                    if (!u) return null;
-                    const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
-                    const uncached = u.prompt_tokens - cached;
-                    return (
-                      <span style={{ fontSize: "10px", fontFamily: "monospace", color: yolo ? "rgba(255,255,255,0.25)" : "var(--c-t5)", userSelect: "none" }}>
-                        输入命中 {cached.toLocaleString()} + 输入未命中 {uncached.toLocaleString()} + 输出 {u.completion_tokens.toLocaleString()} = {u.total_tokens.toLocaleString()} tokens
-                      </span>
-                    );
-                  })()}
-                  <div style={{ flex: 1 }} />
-                  {message.content && (
-                    <CopyBtn text={message.content} yolo={yolo} />
-                  )}
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    {(() => {
+                      const u = message.usage;
+                      if (!u) return null;
+                      const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
+                      const uncached = u.prompt_tokens - cached;
+                      return (
+                        <span style={{ fontSize: "10px", fontFamily: "monospace", color: yolo ? "rgba(255,255,255,0.25)" : "var(--c-t5)", userSelect: "none" }}>
+                          输入命中 {cached.toLocaleString()} + 输入未命中 {uncached.toLocaleString()} + 输出 {u.completion_tokens.toLocaleString()} = {u.total_tokens.toLocaleString()} tokens
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  {/* 右侧按钮区：评价按钮 + 撤回按钮 + 复制按钮一起居右 */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                    {message.role === "assistant" && !message.isCalibration && isLastAssistant && (
+                      <VoteBtn rating={message.userRating} onRate={(r) => onRate?.(message.id, r)} yolo={yolo} />
+                    )}
+                    {message.role === "assistant" && !message.isCalibration && isRoundEnd && (
+                      <RecallBtn onRecall={() => onRecall?.(message.id)} yolo={yolo} danger={!isLatestRound} />
+                    )}
+                    {message.content && (
+                      <CopyBtn text={message.content} yolo={yolo} />
+                    )}
+                  </div>
                 </div>
               )}
             </div>

@@ -131,4 +131,58 @@ registerCommand({
   handler: handleVpcCommand,
 });
 
+// ── 内置命令：系统指令注入 /system ─────────────────────
+
+async function handleSystemCommand(args: string, options: CommandOptions): Promise<CommandResult> {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    return { handled: true, message: "用法：/system <系统指令> — 向模型注入一条系统级指令，不占用用户身份。\n例如：/system 你现在是一名冷酷的侦探" };
+  }
+
+  // 框架显示消息：用户能在聊天中看到反馈
+  const displayMsg: Message = {
+    id: `sys_inject_${Date.now()}`,
+    role: "system",
+    content: `[系统消息流转] ${trimmed}`,
+    timestamp: Date.now(),
+    sender: "framework",
+  };
+
+  // 同时持久化干净的系统指令，供 buildApiMessages 读取
+  const sysMsg: Message = {
+    id: `sys_inject_${Date.now() + 1}`,
+    role: "system",
+    content: trimmed,
+    timestamp: Date.now(),
+  };
+
+  // 持久化到会话中：先移除旧的系统指令，再追加新的
+  // 避免多条互相矛盾的 system 消息在上下文中堆积
+  options.updateConv(options.activeId, (c) => ({
+    ...c,
+    messages: [...c.messages.filter((m) => !m.id.startsWith("sys_inject_")), displayMsg],
+    memoryMessages: [
+      ...(c.memoryMessages ?? c.messages).filter((m) => !m.id.startsWith("sys_inject_")),
+      sysMsg,
+      displayMsg,
+    ],
+    updatedAt: Date.now(),
+  }));
+
+  console.log("[commandSystem /system] 已注入系统指令（替换旧指令）:", trimmed);
+  return { handled: true };
+}
+
+registerCommand({
+  name: "system",
+  description: "注入系统级指令 — 向模型发送一条系统消息，用于微调角色行为或设定上下文，不占用用户身份。例：/system 从现在起你要用英文回复",
+  handler: handleSystemCommand,
+});
+
+registerCommand({
+  name: "sys",
+  description: "注入系统级指令（/system 的别名）",
+  handler: handleSystemCommand,
+});
+
 

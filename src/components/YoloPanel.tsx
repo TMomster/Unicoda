@@ -855,6 +855,104 @@ export default function YoloPanel({ onBack }: Props) {
     chatStream.handleCompressNow(activeId);
   }, [chatStream.handleCompressNow, activeId]);
 
+  /** 用户对模型回复评价（Yolo模式，null 取消评价） */
+  const handleRateYoloMessage = useCallback(
+    (messageId: string, rating: "up" | "down" | null) => {
+      if (!activeId) return;
+      const pathRef = sessionPathRef.current;
+      setConversations((prev) => {
+        const conv = prev.find((c) => c.id === activeId);
+        if (!conv) return prev;
+
+        const msgs = conv.messages;
+        const idx = msgs.findIndex((m) => m.id === messageId);
+        if (idx === -1) return prev;
+
+        const nextMsg = msgs[idx + 1];
+        let updatedConv: Conversation;
+
+        if (rating === null) {
+          // 取消评价：清除 userRating，移除后面的评价消息
+          const updatedMsg = { ...msgs[idx], userRating: undefined };
+          if (nextMsg?.isRatingEval) {
+            updatedConv = withMsgUpdate(conv, (all) => {
+              const copy = [...all];
+              copy[idx] = updatedMsg;
+              copy.splice(idx + 1, 1);
+              return copy;
+            });
+          } else {
+            updatedConv = withMsgUpdate(conv, (all) => {
+              const copy = [...all];
+              copy[idx] = updatedMsg;
+              return copy;
+            });
+          }
+        } else {
+          const updatedMsg = { ...msgs[idx], userRating: rating };
+          const evalContent = rating === "up"
+            ? "【用户评价反馈】用户对上一条回复的评价为：满意。这是系统记录的客观反馈，模型应将其作为调整回复风格的重要依据。"
+            : "【用户评价反馈】用户对上一条回复的评价为：不满意。这是系统记录的客观反馈，模型应将其作为调整回复风格的重要依据。";
+
+          if (nextMsg?.isRatingEval) {
+            const updatedEval = { ...nextMsg, content: evalContent };
+            updatedConv = withMsgUpdate(conv, (all) =>
+              all.map((m, i) => (i === idx ? updatedMsg : i === idx + 1 ? updatedEval : m)),
+            );
+          } else {
+            const evalMsg: Message = {
+              id: `eval-${messageId}-${rating}-${Date.now()}`,
+              role: "system",
+              sender: "framework",
+              content: evalContent,
+              timestamp: Date.now(),
+              isRatingEval: true,
+            };
+            updatedConv = withMsgUpdate(conv, (all) => {
+              const copy = [...all];
+              copy[idx] = updatedMsg;
+              copy.splice(idx + 1, 0, evalMsg);
+              return copy;
+            });
+          }
+        }
+
+        const updated = prev.map((c) => (c.id === activeId ? updatedConv : c));
+        flushConversations(updated, pathRef);
+        return updated;
+      });
+    },
+    [activeId, withMsgUpdate, flushConversations],
+  );
+
+  /** 撤回本轮消息（Yolo模式） */
+  const handleRecallYoloMessage = useCallback(
+    (messageId: string) => {
+      if (!activeId) return;
+      const pathRef = sessionPathRef.current;
+      setConversations((prev) => {
+        const conv = prev.find((c) => c.id === activeId);
+        if (!conv) return prev;
+        const msgs = conv.messages;
+        const recallIdx = msgs.findIndex((m) => m.id === messageId);
+        if (recallIdx === -1) return prev;
+        let removeStartIdx = -1;
+        for (let i = recallIdx; i >= 0; i--) {
+          if (msgs[i].role === "user") {
+            removeStartIdx = i;
+            break;
+          }
+        }
+        if (removeStartIdx === -1) return prev;
+        const updatedConv = withMsgUpdate(conv, (all) => all.slice(0, removeStartIdx));
+        const updated = prev.map((c) => (c.id === activeId ? updatedConv : c));
+        flushConversations(updated, pathRef);
+        return updated;
+      });
+    },
+    [activeId, withMsgUpdate, flushConversations],
+  );
+
   // ── Ctrl+P Print Dialog ──
   const handleCreateRef = useRef(handleCreate);
   handleCreateRef.current = handleCreate;
@@ -974,7 +1072,7 @@ export default function YoloPanel({ onBack }: Props) {
                 animation: "yolo-content-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both",
               }}>
                 {activeConv && activeConv.messages.length > 0 ? (
-                  <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} isStreaming={chatStream.isStreaming} />
+                  <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} onRate={handleRateYoloMessage} onRecall={handleRecallYoloMessage} isStreaming={chatStream.isStreaming} />
                 ) : !activeConv ? (
                   <YoloWelcome subtitle={t("whatToDo")} />
                 ) : (

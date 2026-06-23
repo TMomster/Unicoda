@@ -142,13 +142,14 @@ export default function PrintDialog({
   const [showUnisonInfo, setShowUnisonInfo] = useState(true);
   const [showAnchors, setShowAnchors] = useState(false);
   const [showSecurityApproval, setShowSecurityApproval] = useState(true);
+  const [showFrameworkMessages, setShowFrameworkMessages] = useState(true);
   const [showTokenUsage, setShowTokenUsage] = useState(true);
 
-  // 默认全选所有 user、assistant 和权限记录消息（跳过 tool 和普通 system）
+  // 默认全选所有 user、assistant、权限记录、Framework/Security 消息（跳过 tool 和普通 system）
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     for (const msg of messages) {
-      if (msg.role === "user" || msg.role === "assistant" || msg.permissionRecord || msg.isSecurityApproval || msg.isCalibration) {
+      if (msg.role === "user" || msg.role === "assistant" || msg.permissionRecord || msg.isSecurityApproval || msg.isCalibration || msg.sender === "framework") {
         initial.add(msg.id);
       }
     }
@@ -377,7 +378,7 @@ export default function PrintDialog({
     }
   }, []);
 
-  const allVisible = messages.filter((m) => m.role === "user" || m.role === "assistant" || m.permissionRecord || m.isSecurityApproval || m.isCalibration);
+  const allVisible = messages.filter((m) => m.role === "user" || m.role === "assistant" || m.permissionRecord || m.isSecurityApproval || m.isCalibration || m.sender === "framework");
   const allSelected = allVisible.length > 0 && allVisible.every((m) => selectedIds.has(m.id));
   const selectedCount = selectedIds.size;
 
@@ -388,6 +389,7 @@ export default function PrintDialog({
     if (hideToolCalls && m.role === "tool") return false;
     if (hideDebugInfo && m.role === "assistant" && m.toolDebugInfo && m.toolDebugInfo.length > 0) return false;
     if (!showSecurityApproval && m.isSecurityApproval) return false;
+    if (!showFrameworkMessages && m.sender === "framework") return false;
     return true;
   });
 
@@ -967,7 +969,8 @@ export default function PrintDialog({
 
         <span style={{ width: "1px", height: "18px", background: "var(--c-bd)", margin: "0 4px" }} />
 
-        <PrintSettingToggle checked={showSecurityApproval} onChange={() => setShowSecurityApproval((v) => !v)} label="安全审批" />
+        <PrintSettingToggle checked={showSecurityApproval} onChange={() => setShowSecurityApproval((v) => !v)} label="UnicodaSecurity 消息" />
+        <PrintSettingToggle checked={showFrameworkMessages} onChange={() => setShowFrameworkMessages((v) => !v)} label="Unicoda Framework 消息" />
         <PrintSettingToggle checked={showTokenUsage} onChange={() => setShowTokenUsage((v) => !v)} label="Token 记录" />
 
         <span style={{ flex: 1 }} />
