@@ -567,11 +567,13 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
         ]));
         let fullContent = "";
         let fullReasoning = "";
+        let lastUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
         const msgs = [...baseMessages, ...allToolResults, { role: "user" as const, content: prompt }];
         try {
           for await (const chunk of streamChatCompletion(selectedModel!, msgs, abortController.signal)) {
             fullContent += chunk.content;
             fullReasoning += (chunk.reasoningContent || "");
+            if (chunk.usage) lastUsage = chunk.usage;
             const displayContent = stripToolCalls(fullContent);
             updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
               msgs.map((msg) => msg.id === assistantId
@@ -583,7 +585,7 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
           updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => msgs.filter((m) => m.id !== assistantId)));
         } else {
           updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-            msgs.map((m) => m.id === assistantId ? { ...m, streaming: false, content: stripToolCalls(fullContent) } : m),
+            msgs.map((m) => m.id === assistantId ? { ...m, streaming: false, content: stripToolCalls(fullContent), usage: lastUsage } : m),
           ));
         }
         return fullContent;

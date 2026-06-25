@@ -32,6 +32,53 @@ export interface ToolResult {
 
 // ─── Agent 系统提示词 ─────────────────────────────────
 
+// ══════════════════════════════════════════════════════════
+// 三层缓存（Token 优化：避免每次全量重建 System Prompt）
+// ══════════════════════════════════════════════════════════
+interface StaticLayerKey {
+  mode: Mode;
+  preferredLanguage?: string;
+  workspacePath?: string;
+  panelMode?: PanelMode;
+}
+
+interface QuasiStaticLayerKey {
+  mode: Mode;
+  kbMode?: KnowledgeMode;
+  customPrompt?: string;
+  panelMode?: PanelMode;
+}
+
+let staticLayerCache: { key: string; value: string } | null = null;
+let quasiStaticLayerCache: { key: string; value: string } | null = null;
+
+function buildStaticLayerKey(params: StaticLayerKey): string {
+  // 使用 JSON 序列化作为缓存 key，避免深层比较
+  return JSON.stringify({ mode: params.mode, lang: params.preferredLanguage, ws: params.workspacePath, panel: params.panelMode });
+}
+
+function buildQuasiStaticLayerKey(params: QuasiStaticLayerKey): string {
+  return JSON.stringify({ mode: params.mode, kb: params.kbMode, cp: params.customPrompt, panel: params.panelMode });
+}
+
+/**
+ * 当用户编辑模块/知识库/自定义提示词时，调用此函数强制重置准静态层缓存。
+ */
+export function invalidateQuasiStaticCache(): void {
+  quasiStaticLayerCache = null;
+  console.log('[agentEngine] 准静态层缓存已失效');
+}
+
+/**
+ * 当用户切换 mode/语言/工作区/面板时，调用此函数重置所有缓存。
+ */
+export function invalidateAllCaches(): void {
+  staticLayerCache = null;
+  quasiStaticLayerCache = null;
+  console.log('[agentEngine] 所有缓存已失效');
+}
+// ══════════════════════════════════════════════════════════
+
 /** 格式化模组参数为 markdown 文档 */
 function formatModuleParamsDoc(
   params: { name: string; type: string; required: boolean; description: string; default?: string; min?: number; max?: number }[] | undefined,
@@ -62,22 +109,15 @@ function buildKnowledgeSection(kbMode?: KnowledgeMode, locale?: string): string 
   return formatKnowledgeForPrompt(kbMode, locale);
 }
 
-/**
- * 构建 Agent 系统提示词，注入 Unicoda 身份认知与模组知识库。
- * @param mode  当前对话模式
- * @param customPrompt  用户自定义的 system prompt（可选）
- * @param workspacePath  当前工作区路径（Yolo 模式每个会话独立记录）
- * @param kbMode  知识库层级过滤（未传则仅 framework 级别可见）
- * @param panelMode  工作模式（Default / Yolo），用于筛选 scope 匹配的模组
- */
-export function buildAgentSystemPrompt(
+// ─── 三层缓存：静态层 ──────────────────────────────────────────
+// 包含：语言指令 + 角色设定 + 工作区上下文 + 输出格式
+// 这些内容在会话间不变（除非用户切换 mode/语言/工作区）
+
+function buildStaticLayer(
   mode: Mode,
-  customPrompt?: string,
-  workspacePath?: string,
-  kbMode?: KnowledgeMode,
-  panelMode?: PanelMode,
   preferredLanguage?: PreferredLanguage,
-  xmemorySummary?: string,
+  workspacePath?: string,
+  panelMode?: PanelMode,
 ): string {
   const parts: string[] = [];
 
@@ -251,6 +291,55 @@ export function buildAgentSystemPrompt(
 如果你已经应用了一张角色卡，但用户的后续消息明确要求你恢复默认身份或切换为其他角色，以用户的最新指令为准。`);
 
   // ═══════════════════════════════════════════════════════════
+  // 末尾语言提醒（简短强化，完整指令已在开头给出）
+  // ═══════════════════════════════════════════════════════════
+  if (preferredLanguage) {
+    const langReminder: Record<string, string> = {
+      "zh-CN": "【重申】你必须使用汉语（中文）。",
+      "en-US": "【REMINDER】You must output in English (en-US).",
+      "en-GB": "【REMINDER】You must output in British English (en-GB) following the spelling, vocabulary, and date conventions listed above.",
+      "en-AU": "【REMINDER】You must output in Australian English (en-AU) following the distinctive vocabulary, spellings, and tones listed above.",
+      "en-IN": "【REMINDER】You must output in Indian English (en-IN) following the specific vocabulary and grammar conventions listed above.",
+      "de-DE": "【WIEDERHOLUNG】Sie m\u00fcssen auf Deutsch antworten.",
+      "ja-JP": "【再確認】日本語で出力する必要があります。",
+      "fr-FR": "【RAPPEL】Vous devez répondre en français.",
+      "es-ES": "【RECORDATORIO】Debe responder en español.",
+    };
+    const reminder = langReminder[preferredLanguage];
+    if (reminder) parts.push(reminder);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 末尾格式强调块（近因效应：模型最能记住最后的指令）
+  // ═══════════════════════════════════════════════════════════
+  parts.push(`## ⚠️ 输出格式强制指令（违反导致解析失败）
+
+决定调用工具时：
+
+**回复的首字符必须为 \`<\`**，禁止先输出任何对话文本：
+
+❌ \`我先搜索一下...<tool_call>...\`
+✅ \`<tool_call>{"id":"...","params":{...}}</tool_call>\`
+
+输出 \`<tool_call>\` 后不得附带其他文本（解释/分析待结果返回后再输出）。`);
+
+  return parts.join("\n\n");
+}
+
+// ─── 三层缓存：准静态层 ───────────────────────────────────────
+// 包含：模块文档 + 任务计划 + 知识库 + 自定义提示词
+// 这些内容在用户编辑模块/知识库/自定义提示词时才变化
+
+function buildQuasiStaticLayer(
+  mode: Mode,
+  kbMode?: KnowledgeMode,
+  customPrompt?: string,
+  panelMode?: PanelMode,
+  preferredLanguage?: PreferredLanguage,
+): string {
+  const parts: string[] = [];
+
+  // ═══════════════════════════════════════════════════════════
   // Agent / Chat 模式模组系统
   // Agent：注入全部模组 + 完整协议 + 场景判断
   // Chat：  仅注入普通模组 + 简化调用协议
@@ -274,9 +363,7 @@ export function buildAgentSystemPrompt(
     "create_xmemory_card",
     "find_xmemory_granule",
   ]);
-  if (!xmemorySummary) {
-    relevantMods = relevantMods.filter((m) => !xmemoryBindingRequired.has(m.id));
-  }
+  // 准静态层不做 XMemory 绑定判断，保留全部模组供动态层筛选
 
   if (relevantMods.length > 0) {
     if (mode === "Agent") {
@@ -449,8 +536,50 @@ ${toolDocs.join("\n\n---\n\n")}`);
   if (kbSection) parts.push(kbSection);
 
   // ═══════════════════════════════════════════════════════════
-  // XMemory 记忆提取强制指令（有绑定卡时注入）
+  // 用户自定义提示词（可选，所有模式均注入）
   // ═══════════════════════════════════════════════════════════
+  if (customPrompt) {
+    parts.push(`## 附加指令\n\n${customPrompt}`);
+  }
+
+  return parts.join("\n\n");
+}
+
+/**
+ * 构建 Agent 系统提示词（三层缓存版本）。
+ * 静态层（语言/角色/格式）和准静态层（模块/知识库/自定义提示词）由缓存提供，
+ * 动态层（XMemory 记忆协议）每轮重建。
+ */
+export function buildAgentSystemPrompt(
+  mode: Mode,
+  customPrompt?: string,
+  workspacePath?: string,
+  kbMode?: KnowledgeMode,
+  panelMode?: PanelMode,
+  preferredLanguage?: PreferredLanguage,
+  xmemorySummary?: string,
+): string {
+  // ── 静态层缓存 ──
+  const staticKey = buildStaticLayerKey({ mode, preferredLanguage, workspacePath, panelMode });
+  if (!staticLayerCache || staticLayerCache.key !== staticKey) {
+    staticLayerCache = {
+      key: staticKey,
+      value: buildStaticLayer(mode, preferredLanguage, workspacePath, panelMode),
+    };
+  }
+
+  // ── 准静态层缓存 ──
+  const quasiStaticKey = buildQuasiStaticLayerKey({ mode, kbMode, customPrompt, panelMode });
+  if (!quasiStaticLayerCache || quasiStaticLayerCache.key !== quasiStaticKey) {
+    quasiStaticLayerCache = {
+      key: quasiStaticKey,
+      value: buildQuasiStaticLayer(mode, kbMode, customPrompt, panelMode, preferredLanguage),
+    };
+  }
+
+  const parts: string[] = [staticLayerCache.value, quasiStaticLayerCache.value];
+
+  // ── 动态层：XMemory 记忆注入（每轮重建） ──
   if (xmemorySummary) {
     parts.push(`## 🔴 强制记忆提取协议
 
@@ -477,53 +606,8 @@ ${toolDocs.join("\n\n---\n\n")}`);
 如果在需要提取记忆的轮次中没有创建任何颗粒就进入角色扮演，角色关键信息将在 20 轮对话后被截断遗忘，导致角色一致性永久受损。`);
 
     parts.push(xmemorySummary);
-  }
 
-  // ═══════════════════════════════════════════════════════════
-  // 用户自定义提示词（可选，所有模式均注入）
-  // ═══════════════════════════════════════════════════════════
-  if (customPrompt) {
-    parts.push(`## 附加指令\n\n${customPrompt}`);
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // 末尾语言提醒（简短强化，完整指令已在开头给出）
-  // ═══════════════════════════════════════════════════════════
-  if (preferredLanguage) {
-    const langReminder: Record<string, string> = {
-      "zh-CN": "【重申】你必须使用汉语（中文）。",
-      "en-US": "【REMINDER】You must output in English (en-US).",
-      "en-GB": "【REMINDER】You must output in British English (en-GB) following the spelling, vocabulary, and date conventions listed above.",
-      "en-AU": "【REMINDER】You must output in Australian English (en-AU) following the distinctive vocabulary, spellings, and tones listed above.",
-      "en-IN": "【REMINDER】You must output in Indian English (en-IN) following the specific vocabulary and grammar conventions listed above.",
-      "de-DE": "【WIEDERHOLUNG】Sie müssen auf Deutsch antworten.",
-      "ja-JP": "【再確認】日本語で出力する必要があります。",
-      "fr-FR": "【RAPPEL】Vous devez répondre en français.",
-      "es-ES": "【RECORDATORIO】Debe responder en español.",
-    };
-    const reminder = langReminder[preferredLanguage];
-    if (reminder) parts.push(reminder);
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // 末尾格式强调块（近因效应：模型最能记住最后的指令）
-  // ═══════════════════════════════════════════════════════════
-  parts.push(`## ⚠️ 输出格式强制指令（违反导致解析失败）
-
-决定调用工具时：
-
-**回复的首字符必须为 \`<\`**，禁止先输出任何对话文本：
-
-❌ \`我先搜索一下...<tool_call>...\`
-✅ \`<tool_call>{"id":"...","params":{...}}</tool_call>\`
-
-输出 \`<tool_call>\` 后不得附带其他文本（解释/分析待结果返回后再输出）。`);
-
-  // ═══════════════════════════════════════════════════════════
-  // XMemory 记忆紧急指令（仅在绑卡时注入，作为整个提示词的最终约束）
-  // 利用近因效应让模型在首次对话中最优先执行记忆提取
-  // ═══════════════════════════════════════════════════════════
-  if (xmemorySummary) {
+    // XMemory 首次记忆提取（利用近因效应放在最末尾）
     parts.push(`## 🔴 XMemory 首次记忆提取（绝对必须遵守）
 
 如果记忆卡为空且这是本轮对话中你第一次看到用户消息：
@@ -537,8 +621,9 @@ ${toolDocs.join("\n\n---\n\n")}`);
 你的思考/推理过程中可以分析和拆解角色信息，但可见回复必须是纯工具调用。等到所有颗粒创建完成、工具结果返回后，下一轮模型调用再以角色身份回复。`);
   }
 
-  return parts.join("\n\n");
+  return parts.filter(Boolean).join("\n\n");
 }
+
 
 // ─── 子智能体 System Prompt ──────────────────────────
 

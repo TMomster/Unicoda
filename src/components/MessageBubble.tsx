@@ -1327,6 +1327,47 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               )}
             </div>
           )}
+          {/* ── 轮次分隔线 + Token 消耗总结（仅在每轮结尾的 assistant 消息显示） ── */}
+          {!isStreaming && message.role === "assistant" && isRoundEnd && (() => {
+            const u = message.usage;
+            if (!u) return null;
+            const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
+            const uncached = u.prompt_tokens - cached;
+            return (
+              <div role="separator" style={{
+                marginTop: "8px",
+                marginBottom: "2px",
+                padding: "8px 12px",
+                borderRadius: "8px",
+                background: yolo ? "rgba(255,255,255,0.06)" : "var(--c-bg2, #f5f5f5)",
+                border: yolo ? "1px solid rgba(255,255,255,0.08)" : "1px solid var(--c-bd, #e0e0e0)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "12px",
+                fontSize: "11px",
+                fontFamily: "monospace",
+                color: yolo ? "rgba(255,255,255,0.35)" : "var(--c-t6, #999)",
+                userSelect: "none",
+              }}>
+                <span>📊 本轮消耗</span>
+                <span style={{ color: yolo ? "rgba(255,255,255,0.5)" : "var(--c-t5)" }}>
+                  输入 <strong style={{ fontWeight: 600, color: yolo ? "#fff" : "var(--c-txt)" }}>{u.prompt_tokens.toLocaleString()}</strong>
+                </span>
+                {cached > 0 && (
+                  <span style={{ color: yolo ? "rgba(52,211,153,0.6)" : "#10b981" }}>
+                    (缓存命中 {cached.toLocaleString()})
+                  </span>
+                )}
+                <span style={{ color: yolo ? "rgba(255,255,255,0.5)" : "var(--c-t5)" }}>
+                  输出 <strong style={{ fontWeight: 600, color: yolo ? "#fff" : "var(--c-txt)" }}>{u.completion_tokens.toLocaleString()}</strong>
+                </span>
+                <span style={{ color: yolo ? "rgba(255,255,255,0.5)" : "var(--c-t5)" }}>
+                  合计 <strong style={{ fontWeight: 600, color: yolo ? "#52d3e6" : "var(--c-pr, #3b82f6)" }}>{u.total_tokens.toLocaleString()}</strong>
+                </span>
+              </div>
+            );
+          })()}
           {isStreaming && !hasReasoning && !isTool && !message.toolCallInProgress && (
             <span className="streaming-cursor">▊</span>
           )}
