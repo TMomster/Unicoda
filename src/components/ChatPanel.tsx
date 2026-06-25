@@ -24,9 +24,11 @@ interface Props {
   onRecall?: (messageId: string) => void;
   /** 模型正在生成中 */
   isStreaming?: boolean;
+  /** 隐藏欢迎页的功能提示气泡（移动端使用） */
+  hideWelcomeHints?: boolean;
 }
 
-function WelcomeScreen() {
+function WelcomeScreen({ hideHints }: { hideHints?: boolean }) {
   const { t } = useTheme();
   const hints = [
     t("fileReadWrite"),
@@ -71,19 +73,21 @@ function WelcomeScreen() {
       </p>
 
       {/* Feature hints */}
-      <div
-        style={{
-          display: "flex",
-          gap: "8px",
-          flexWrap: "wrap",
-          justifyContent: "center",
-          marginTop: "8px",
-        }}
-      >
-        {hints.map((hint) => (
-          <Hint key={hint} tag={hint} />
-        ))}
-      </div>
+      {!hideHints && (
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            marginTop: "8px",
+          }}
+        >
+          {hints.map((hint) => (
+            <Hint key={hint} tag={hint} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -119,6 +123,7 @@ export default function ChatPanel({
   onRate,
   onRecall,
   isStreaming,
+  hideWelcomeHints,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -173,7 +178,7 @@ export default function ChatPanel({
   }, [messages]);
 
   if (messages.length === 0) {
-    return <WelcomeScreen />;
+    return <WelcomeScreen hideHints={hideWelcomeHints} />;
   }
 
   return (

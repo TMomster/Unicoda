@@ -548,7 +548,11 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     let allToolResults: { role: string; content: string }[] = [];
 
     // ── XMemory 轮询模式：系统分步询问，从机制上杜绝意念更新 ──
-    if (xmemorySummary) {
+    // 注意：空卡时跳过轮询模式——此时 AI 需要先创建初始颗粒，
+    // 而轮询模式的 Phase 1 仅询问"更新已有记忆"导致冲突。
+    // 空卡交给下方标准 while 循环处理，该循环正确解析并执行 <tool_call>。
+    const xmemCardIsEmpty = xmemorySummary?.includes("记忆卡为空（紧急：首次信息提取窗口）") ?? false;
+    if (xmemorySummary && !xmemCardIsEmpty) {
       const baseMessages = initialApiMessages.slice(0, -1); // system + history
 
       // 流式获取单轮回复，处理 UI 显示
@@ -631,6 +635,11 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
         true,
       );
       return; // 轮询模式结束，不走下方 while 循环
+    }
+
+    // 空卡日志提示
+    if (xmemCardIsEmpty) {
+      console.log(`[useChatStream] XMemory 卡为空，跳过轮询模式，由标准循环处理工具调用`);
     }
 
     let complete = false;

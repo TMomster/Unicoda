@@ -32,17 +32,17 @@ function generateId(releasedIds: string[], existingIds: Set<string>): string {
     existingIds.add(id);
     return id;
   }
-  // 随机生成
+  // 随机生成 0000-9999，与桌面端 genCardId 保持一致
   for (let attempt = 0; attempt < 200; attempt++) {
-    const id = String(Math.floor(1000 + Math.random() * 9000)); // 1000-9999
+    const id = String(Math.floor(Math.random() * 10000)).padStart(4, "0");
     if (!existingIds.has(id)) {
       existingIds.add(id);
       return id;
     }
   }
   // 极端情况：遍历所有可能
-  for (let n = 1000; n <= 9999; n++) {
-    const id = String(n);
+  for (let n = 0; n <= 9999; n++) {
+    const id = String(n).padStart(4, "0");
     if (!existingIds.has(id)) {
       existingIds.add(id);
       return id;

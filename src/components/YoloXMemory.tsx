@@ -10,6 +10,7 @@ import {
 import YoloChatPanel from "./YoloChatPanel";
 import InputBar from "./InputBar";
 
+// 注意：此提示词在 MobileXMemoryChatView.tsx 中有同步副本。修改时请同时更新另一份。
 const XMEMORY_SYSTEM_PROMPT = `【XMemory 角色扮演记忆管理系统激活】
 你当前处于记忆管理对话中。你可以自主管理记忆颗粒，采用仿生学方法模拟人脑的思维与记忆模式。
 
