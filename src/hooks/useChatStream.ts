@@ -547,101 +547,89 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     }
     let allToolResults: { role: string; content: string }[] = [];
 
-    // ── XMemory 轮询模式：系统分步询问，从机制上杜绝意念更新 ──
-    // 注意：空卡时跳过轮询模式——此时 AI 需要先创建初始颗粒，
-    // 而轮询模式的 Phase 1 仅询问"更新已有记忆"导致冲突。
-    // 空卡交给下方标准 while 循环处理，该循环正确解析并执行 <tool_call>。
-    const xmemCardIsEmpty = xmemorySummary?.includes("记忆卡为空（紧急：首次信息提取窗口）") ?? false;
-    if (xmemorySummary && !xmemCardIsEmpty) {
-      const baseMessages = initialApiMessages.slice(0, -1); // system + history
+    // ── XMemory 3 阶段轮询：显式询问记忆更新（P1 缓存后阶段间仅多 ~100 tokens） ──
+    // 去掉主动询问后模型不会主动更新记忆，必须保留轮询结构。
+    if (xmemorySummary) {
+      const userText = userMsg.content;
+      const baseMsgs = initialApiMessages.slice(0, -1);
 
-      // 流式获取单轮回复，处理 UI 显示
-      async function xmemStreamTurn(
+      async function xmemRound(
         prompt: string,
-        keepDisplay: boolean,
-      ): Promise<string> {
-        const assistantId = String(nextMsgId++);
-        streamingMsgIdsRef.current.set(activeId, assistantId);
+        opts: { keepDisplay: boolean; showToolCalls?: boolean; showReasoning?: boolean; prefix?: string },
+      ): Promise<{ full: string; reasoning: string }> {
+        const aid = String(nextMsgId++);
+        streamingMsgIdsRef.current.set(activeId, aid);
         updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [
-          ...msgs, { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), streaming: true } as Message,
+          ...msgs, { id: aid, role: "assistant", content: opts.prefix || "", timestamp: Date.now(), streaming: true } as Message,
         ]));
-        let fullContent = "";
-        let fullReasoning = "";
-        let lastUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
-        const msgs = [...baseMessages, ...allToolResults, { role: "user" as const, content: prompt }];
+        let full = "", reasoning = "", usage: any;
+        let reasoningEnded = false;
+        const msgs = [...baseMsgs, ...allToolResults, { role: "user" as const, content: prompt }];
         try {
-          for await (const chunk of streamChatCompletion(selectedModel!, msgs, abortController.signal)) {
-            fullContent += chunk.content;
-            fullReasoning += (chunk.reasoningContent || "");
-            if (chunk.usage) lastUsage = chunk.usage;
-            const displayContent = stripToolCalls(fullContent);
+          for await (const ch of streamChatCompletion(selectedModel!, msgs, abortController.signal)) {
+            full += ch.content; reasoning += (ch.reasoningContent || "");
+            if (ch.usage) usage = ch.usage;
+            if (!reasoningEnded && reasoning && ch.content) reasoningEnded = true;
+
+            let display = opts.prefix || "";
+            let rc: string | undefined;
+            if (opts.showReasoning) {
+              rc = reasoning;
+              const verdict = reasoningEnded ? (full.trim().startsWith("是") ? "✅ 需要更新记忆" : "⏭️ 无需更新记忆") : "分析中...";
+              display += `\n${verdict}`;
+              if (opts.showToolCalls && reasoningEnded && full.includes("<tool_call")) {
+                const tools = full.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, (m) => `\n${m}`).trim();
+                display += `\n${tools}`;
+              }
+            } else if (opts.showToolCalls) {
+              display += `\n${full}`;
+            } else {
+              display += `\n${stripToolCalls(full)}`;
+            }
             updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-              msgs.map((msg) => msg.id === assistantId
-                ? { ...msg, content: displayContent, toolCallInProgress: fullContent.includes("<tool_call") } : msg),
-            ));
+              msgs.map((m) => m.id === aid ? { ...m, content: display, toolCallInProgress: full.includes("<tool_call"), reasoningContent: rc, ...(reasoningEnded ? { reasoningEndTime: Date.now() } : {}) } : m)));
           }
-        } catch { /* 单轮失败不中断整体流程 */ }
-        if (!keepDisplay || !stripToolCalls(fullContent)) {
-          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => msgs.filter((m) => m.id !== assistantId)));
+        } catch { /* 单轮失败不中断 */ }
+        const toolBlock = full.includes("<tool_call") ? "\n" + full.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, (m) => m).trim() : "";
+        const finalDisplay = opts.showReasoning
+          ? `${opts.prefix || ""}\n${full.trim().startsWith("是") ? "✅ 需要更新记忆" : "⏭️ 无需更新记忆"}${opts.showToolCalls ? toolBlock : ""}`
+          : opts.showToolCalls
+            ? (opts.prefix ? `${opts.prefix}\n${full}` : full)
+            : (opts.prefix ? `${opts.prefix}\n${stripToolCalls(full)}` : stripToolCalls(full));
+        if (!opts.keepDisplay || !stripToolCalls(full)) {
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => msgs.filter((m) => m.id !== aid)));
         } else {
           updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-            msgs.map((m) => m.id === assistantId ? { ...m, streaming: false, content: stripToolCalls(fullContent), usage: lastUsage } : m),
-          ));
+            msgs.map((m) => m.id === aid ? { ...m, streaming: false, content: finalDisplay, usage, reasoningContent: opts.showReasoning ? reasoning : undefined, reasoningEndTime: opts.showReasoning && reasoning ? Date.now() : undefined } : m)));
         }
-        return fullContent;
+        return { full, reasoning };
       }
 
-      const userText = userMsg.content;
-
-      // Phase 1: 询问是否需要更新记忆
-      const decisionText = await xmemStreamTurn(
-        `[XMemory判断] 用户消息：${userText}\n\n请检查以下内容，判断是否需要操作记忆颗粒：
-1. 情节进展是否导致已有具象颗粒（位置、状态、情绪、环境等）过时或矛盾？
-2. 是否有需要新增的具象颗粒来描述当前场景？
-3. 是否有不再重要或已过时的颗粒需要清理回收？
-
-需要操作请回复"是"，不需要请回复"否"。`,
-        false,
+      // Phase 1（合并）：判断 + 执行 — 模型分析完直接输出 tool_call，无需再走一轮
+      const p1 = await xmemRound(
+        `[XMemory] 用户消息：${userText}\n\n是否需要更新记忆？检查场景/状态/情绪/关系变化，或需要新增/回收颗粒。一次判断即可，不要在推理中反复质疑自己。\n- 不需要更新：回复"否"\n- 需要更新：先回复"是"，然后紧跟着输出 <tool_call> 标签执行操作（更新/创建/回收颗粒），不要输出角色对白。`,
+        { keepDisplay: true, showReasoning: true, showToolCalls: true, prefix: "💭 XMemory：正在分析是否需要更新记忆..." },
       );
-      const needUpdate = decisionText.trim().includes("是");
-
-      if (needUpdate) {
-        // Phase 2: 仅工具调用（不含正文）
-        const toolOutput = await xmemStreamTurn(
-          `你判定需要更新记忆。请执行以下操作，仅输出${'<tool_call>'}标签：
-- 更新所有与当前情节/环境矛盾的现有具象颗粒
-- 创建描述当前场景所需的新具象颗粒
-- 删除/回收已过时、不再重要或与现状矛盾的颗粒
-不要输出角色对白。`,
-          false,
-        );
-        // 解析并执行工具调用（仅从可见内容解析，不由 reasoning 解析）
-        const contentCalls = parseToolCalls(toolOutput);
-        allToolResults.push({ role: "assistant", content: toolOutput });
-        const allCalls = [...contentCalls]; // 本阶段只从可见内容解析
-        for (const call of allCalls) {
-          const permit = async () => await checkPermission(call.id, activeId);
-          const result = await executeToolCall(call, abortController.signal, selectedModel, permit);
-          allToolResults.push({
-            role: "user" as const,
-            content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
-          });
+      // 从同一轮输出中同时解析"是/否"和 tool_call
+      const needUpdate = p1.full.trim().startsWith("是");
+      const p1Calls = parseToolCalls(p1.full);
+      if (needUpdate && p1Calls.length > 0) {
+        allToolResults.push({ role: "assistant", content: p1.full });
+        for (const c of p1Calls) {
+          const permit = async () => await checkPermission(c.id, activeId);
+          const r = await executeToolCall(c, abortController.signal, selectedModel, permit);
+          allToolResults.push({ role: "user" as const, content: `[结果 - ${c.id}]\n${r.error ? `错误：${r.error}` : r.content}` });
         }
       }
 
-      // Phase 3: 正文输出（必须包含原始用户消息，否则模型不知道用户问了什么）
-      await xmemStreamTurn(
+      // Phase 2（原 Phase 3）：正文输出
+      await xmemRound(
         needUpdate
-          ? `记忆操作已完成。现在请以角色身份回复用户的这条消息：\n\n${userText}`
-          : `你判定不需要更新记忆。请直接以角色身份回复用户的这条消息：\n\n${userText}`,
-        true,
+          ? `记忆操作完成。请以角色身份回复用户的消息：\n\n${userText}`
+          : `不需要更新记忆。请直接回复用户的消息：\n\n${userText}`,
+        { keepDisplay: true },
       );
-      return; // 轮询模式结束，不走下方 while 循环
-    }
-
-    // 空卡日志提示
-    if (xmemCardIsEmpty) {
-      console.log(`[useChatStream] XMemory 卡为空，跳过轮询模式，由标准循环处理工具调用`);
+      return;
     }
 
     let complete = false;
