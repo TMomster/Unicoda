@@ -36,7 +36,7 @@ export interface SubagentStep {
   prompt: string;
   /** 可选限制工具列表（如不指定则使用当前模式所有可见工具） */
   toolIds?: string[];
-  /** 内部最大推理轮次（默认 5） */
+  /** 内部最大推理轮次（默认 999） */
   maxTurns?: number;
   description: string;
 }
@@ -134,7 +134,7 @@ async function executeSubagentStep(
   permit?: () => Promise<"approve" | "deny">,
 ): Promise<StepResult> {
   const startTime = performance.now();
-  const maxTurns = step.maxTurns || 5;
+  const maxTurns = step.maxTurns || 999;
   // 构建可用工具列表
   const allModules = getAllModules();
   const visibleModules = getModulesForMode(allModules, mode, panelMode);

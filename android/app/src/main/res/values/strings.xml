@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Unicoda Mobile</string>
+    <string name="title_activity_main">Unicoda Mobile</string>
+    <string name="package_name">com.unicoda.mobile</string>
+    <string name="custom_url_scheme">com.unicoda.mobile</string>
+</resources>

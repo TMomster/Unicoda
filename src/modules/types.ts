@@ -42,6 +42,8 @@ export interface Module {
   level: ModuleLevel;
   /** 模组适用范围：universal（通用）| yolo（Yolo 特化），默认为 universal */
   scope?: ModuleScope;
+  /** 是否强制 Security 审批（即使 level 为 normal 也会触发 Security 守护） */
+  forceSecurity?: boolean;
   /** 参数定义（用于自动生成文档） */
   parameters?: ModuleParameter[];
   /** 执行模组，产出文本流 */

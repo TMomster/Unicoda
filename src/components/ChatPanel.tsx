@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import type { Message } from "../types";
 import { useTheme } from "../contexts/ThemeContext";
 import MessageBubble from "./MessageBubble";
@@ -18,8 +18,10 @@ interface Props {
   yolo?: boolean;
   /** 点击文件附件时回调 */
   onPreviewFile?: (file: import("../types").FileAttachment) => void;
-  /** 用户对消息评价回调（点赞/点踩） */
-  onRate?: (messageId: string, rating: "up" | "down") => void;
+  /** 用户对消息评价回调（点赞/点踩，null 取消评价） */
+  onRate?: (messageId: string, rating: "up" | "down" | null) => void;
+  /** 撤回本轮消息回调 */
+  onRecall?: (messageId: string) => void;
   /** 模型正在生成中 */
   isStreaming?: boolean;
 }
@@ -115,6 +117,7 @@ export default function ChatPanel({
   yolo,
   onPreviewFile,
   onRate,
+  onRecall,
   isStreaming,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -149,6 +152,26 @@ export default function ChatPanel({
     setShowScrollBtn(false);
   }, []);
 
+  // 计算每一轮的结束索引和最后一条 assistant 消息索引
+  const { lastAssistantIdx, roundEndIndices, latestRoundEndIdx } = useMemo(() => {
+    let lastAsst = -1;
+    const roundEnds = new Set<number>();
+    // 从后往前找最后一条 assistant 消息
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") { lastAsst = i; break; }
+    }
+    // 找到每一轮的结束位置：assistant 之后跟 user 或是末尾
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].role === "assistant" && (i === messages.length - 1 || messages[i + 1].role === "user")) {
+        roundEnds.add(i);
+      }
+    }
+    // 最新一轮 = roundEnds 中的最大索引
+    let latest = -1;
+    for (const idx of roundEnds) { if (idx > latest) latest = idx; }
+    return { lastAssistantIdx: lastAsst, roundEndIndices: roundEnds, latestRoundEndIdx: latest };
+  }, [messages]);
+
   if (messages.length === 0) {
     return <WelcomeScreen />;
   }
@@ -180,8 +203,8 @@ export default function ChatPanel({
           }}
         >
           <SecurityBubble t={t} />
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo={yolo} onPreviewFile={onPreviewFile} onRate={onRate} />
+          {messages.map((msg, idx) => (
+            <MessageBubble key={msg.id} message={msg} modelName={modelName} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} yolo={yolo} onPreviewFile={onPreviewFile} onRate={onRate} onRecall={onRecall} isLastAssistant={idx === lastAssistantIdx} isRoundEnd={roundEndIndices.has(idx)} isLatestRound={idx === latestRoundEndIdx} />
           ))}
           {(() => {
             const lastUsage = messages.filter((m) => m.role === "assistant" && m.usage).pop()?.usage;

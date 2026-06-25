@@ -102,7 +102,7 @@ const zh: Record<string, string> = {
   contextUnpin: "取消置顶",
   contextDelete: "删除",
   // InputBar
-  inputPlaceholder: "向 Unison 发起会话",
+  inputPlaceholder: "向 Unicoda 发起会话",
   aiDisclaimer: "人工智能技术生成内容仅供参考",
   modeNotSupported: " (暂不支持)",
   // Model Config
@@ -118,15 +118,15 @@ const zh: Record<string, string> = {
   delete: "删除",
   // Disclaimer
   disclaimerTitle: "免责声明",
-  disclaimerFee: "连接模型服务商的 API 将产生费用，具体费率标准由各服务商官方制定，与 Unison 无关。",
+  disclaimerFee: "连接模型服务商的 API 将产生费用，具体费率标准由各服务商官方制定，与 Unicoda 无关。",
   disclaimerSecurity: "用户在使用联网功能过程中，因遭遇网络攻击、数据泄露等造成的损失，由用户自行承担。",
-  disclaimerLegal: "用户不得利用 Unison 进行黑客攻击、开发病毒程序、侵犯他人合法权益等违法违规行为。",
-  disclaimerNeutral: "Unison 作为技术框架，具有技术中立性。",
+  disclaimerLegal: "用户不得利用 Unicoda 进行黑客攻击、开发病毒程序、侵犯他人合法权益等违法违规行为。",
+  disclaimerNeutral: "Unicoda 作为技术框架，具有技术中立性。",
   // Privacy Service
   privacyService: "隐私服务",
   privacyDesc: "开启后可使用锁定服务，保护桌面隐私不被他人直接看到。锁定服务仅遮盖工作区，正在进行的任务不会被取消。",
   privacyWarningTitle: "安全提示",
-  privacyWarning: "Unison 的锁定服务仅用于防止您的隐私直接暴露在桌面上被任何人看到。该服务不具备真正的安全性——密码以哈希形式存储在本地配置文件中，任何拥有您设备访问权限的人均可绕过。请勿依赖本功能保护敏感或机密信息。",
+  privacyWarning: "Unicoda 的锁定服务仅用于防止您的隐私直接暴露在桌面上被任何人看到。该服务不具备真正的安全性——密码以哈希形式存储在本地配置文件中，任何拥有您设备访问权限的人均可绕过。请勿依赖本功能保护敏感或机密信息。",
   privacyEnable: "启用隐私服务",
   privacyDisabled: "隐私服务未开启",
   privacyEnabled: "隐私服务已开启",
@@ -150,7 +150,7 @@ const zh: Record<string, string> = {
   lockDisabled: "锁定服务未开启",
   lockShortcutHint: "快捷键：Ctrl + F12",
   lockStartupLock: "启动时需输入密码",
-  lockStartupLockDesc: "开启后，每次启动 Unison 将要求输入密码才能进入主界面。",
+  lockStartupLockDesc: "开启后，每次启动 Unicoda 将要求输入密码才能进入主界面。",
   lockIdleTimeout: "闲置自动锁定",
   lockIdleTimeoutLabel: "闲置超过",
   lockIdleTimeoutUnit: "分钟后自动锁定",
@@ -265,6 +265,12 @@ const zh: Record<string, string> = {
   cookieClearConfirm: "确认清除所有已存储的搜索 Cookie？下次搜索时将重新建立会话。",
   cookieCleared: "Cookie 已清除",
   cookieUpdated: "最近更新",
+  // Cache Clear
+  cacheClear: "清理缓存",
+  cacheClearDesc: "清除浏览器 localStorage 中的会话缓存。会话列表将只显示磁盘中已保存的对话。",
+  cacheClearBtn: "清除缓存",
+  cacheClearConfirm: "确认清除所有缓存数据？这将移除 localStorage 中的会话元数据缓存。此操作不会影响磁盘中的真实数据。",
+  cacheCleared: "缓存已清除，页面即将重新加载...",
   // Yolo Panel
   yoloWelcome: "We talk, We code.",
   yoloPanel: "Yolo 面板",
@@ -283,11 +289,11 @@ const zh: Record<string, string> = {
   deselectAll: "取消全选",
   showReasoning: "显示思考过程",
   showModelInfo: "模型信息",
-  showUnisonInfo: "Unison 信息",
+  showUnicodaInfo: "Unicoda 信息",
   showLicense: "许可证声明",
   showAnchors: "生成锚点目录",
   modelInfo: "模型",
-  unisonVersion: "版本",
+  UnicodaVersion: "版本",
   licenseNote: "本记录基于 Apache 2.0 许可证发布，仅供个人参考。",
   tocTitle: "目录",
   // File Upload
@@ -305,8 +311,8 @@ const zh: Record<string, string> = {
   interfaceSection: "界面",
   interfaceSectionDesc: "界面语言、字体、缩放与主题",
   theme: "主题",
-  themeDark: "黑色",
-  themeLight: "白色",
+  themeDark: "深色",
+  themeLight: "浅色",
   themeDisabledInYolo: "Yolo 模式下不可用",
   // SearXNG
   searxngTitle: "SearXNG 搜索服务",
@@ -335,6 +341,18 @@ const zh: Record<string, string> = {
   internetSearchBlocked: "⚠️ 联网搜索已关闭\n\n用户在 Unicoda 设置中关闭了「联网搜索权限」，因此无法调用 web_search 模组执行网络搜索。\n\n你可以向用户解释以下情况，并根据用户意愿选择处理方式：\n\n1. **如果用户希望继续搜索**：可以建议用户在设置面板中开启「联网搜索权限」开关\n2. **如果用户不愿开启搜索**：可以询问用户是否愿意让模型根据自身已知的知识来回答这个问题\n\n请注意：你无法主动帮用户开启该权限，需要用户在界面中手动操作。",
   // Collapsible SearXNG
   searxngExpand: "展开 SearXNG 设置",
+  // UnicodaPlus
+  plusService: "Unicoda Plus 服务",
+  plusServiceDesc: "开启后 Unicoda 将在本地启动 TCP 服务器，允许其他应用（如 Pompeii 音乐播放器）通过 UnicodaPlus 协议连接并进行通信。",
+  plusEnable: "启用 Plus 服务",
+  plusStatusRunning: "运行中",
+  plusStatusStopped: "已停止",
+  plusPort: "端口",
+  plusConnectedClients: "已连接客户端",
+  plusNoClients: "无已连接客户端",
+  plusClientApp: "应用",
+  plusClientCapabilities: "能力数",
+  plusClientConnected: "连接时间",
   // Reset Confirmation
   resetSettings: "重置配置",
   resetSettingsConfirm: "确认重置所有外观和行为配置（隐私和模型配置不受影响）？",
@@ -357,6 +375,15 @@ const zh: Record<string, string> = {
   securityDenyRound: "拒绝本轮所有",
   securityAutoAll: "授权全部",
   securityApprovalRemember: "记住本次选择，本局不再次询问",
+  // XMemory
+  xmemoryCards: "张卡",
+  xmemoryCreate: "新建记忆卡",
+  xmemoryEmpty: "暂无记忆卡，点击上方按钮创建",
+  xmemoryImport: "导入",
+  xmemoryExportAll: "全部导出",
+  xmemoryExport: "导出",
+  xmemoryBound: "已绑定对话",
+  xmemoryUnbound: "未绑定",
 };
 
 const en: Record<string, string> = {
@@ -411,7 +438,7 @@ const en: Record<string, string> = {
   contextPin: "Pin",
   contextUnpin: "Unpin",
   contextDelete: "Delete",
-  inputPlaceholder: "Start a session with Unison",
+  inputPlaceholder: "Start a session with Unicoda",
   aiDisclaimer: "AI-generated content is for reference only",
   modeNotSupported: " (Coming soon)",
   modelService: "Model Service",
@@ -425,15 +452,15 @@ const en: Record<string, string> = {
   advParams: "Advanced Parameters",
   delete: "Delete",
   disclaimerTitle: "Disclaimer",
-  disclaimerFee: "Connecting to model provider APIs will incur costs. Fee rates are determined solely by the respective providers and are unrelated to Unison.",
+  disclaimerFee: "Connecting to model provider APIs will incur costs. Fee rates are determined solely by the respective providers and are unrelated to Unicoda.",
   disclaimerSecurity: "Users bear full responsibility for any losses resulting from network attacks, data breaches, or other security incidents during use.",
-  disclaimerLegal: "Users must not use Unison for hacking, developing malicious software, violating others' legal rights, or any other illegal activities.",
-  disclaimerNeutral: "As a technical framework, Unison maintains technological neutrality.",
+  disclaimerLegal: "Users must not use Unicoda for hacking, developing malicious software, violating others' legal rights, or any other illegal activities.",
+  disclaimerNeutral: "As a technical framework, Unicoda maintains technological neutrality.",
   // Privacy Service
   privacyService: "Privacy Service",
   privacyDesc: "When enabled, you can use the lock service to protect your desktop privacy from casual onlookers. The lock only covers the workspace; ongoing tasks will not be interrupted.",
   privacyWarningTitle: "Security Notice",
-  privacyWarning: "Unison's lock service is designed solely to prevent your privacy from being directly exposed on the desktop. It does NOT provide real security—the password hash is stored locally, and anyone with physical access to your device can bypass it. Do NOT rely on this feature to protect sensitive or confidential information.",
+  privacyWarning: "Unicoda's lock service is designed solely to prevent your privacy from being directly exposed on the desktop. It does NOT provide real security—the password hash is stored locally, and anyone with physical access to your device can bypass it. Do NOT rely on this feature to protect sensitive or confidential information.",
   privacyEnable: "Enable Privacy Service",
   privacyDisabled: "Privacy service is disabled",
   privacyEnabled: "Privacy service is enabled",
@@ -457,7 +484,7 @@ const en: Record<string, string> = {
   lockDisabled: "Lock service is not enabled",
   lockShortcutHint: "Shortcut: Ctrl + F12",
   lockStartupLock: "Require password on startup",
-  lockStartupLockDesc: "When enabled, Unison will require a password to enter the main interface on every startup.",
+  lockStartupLockDesc: "When enabled, Unicoda will require a password to enter the main interface on every startup.",
   lockIdleTimeout: "Auto-lock on idle",
   lockIdleTimeoutLabel: "Lock after",
   lockIdleTimeoutUnit: "minutes of inactivity",
@@ -572,6 +599,12 @@ const en: Record<string, string> = {
   cookieClearConfirm: "Clear all stored search cookies? A new session will be established on the next search.",
   cookieCleared: "Cookies cleared",
   cookieUpdated: "Last updated",
+  // Cache Clear
+  cacheClear: "Clear Cache",
+  cacheClearDesc: "Clear the localStorage session cache. The conversation list will only show sessions saved on disk.",
+  cacheClearBtn: "Clear Cache",
+  cacheClearConfirm: "Are you sure you want to clear all cached data? This will remove localStorage session metadata cache. Disk data will not be affected.",
+  cacheCleared: "Cache cleared, page is reloading...",
   // Yolo Panel
   yoloWelcome: "We talk, We code.",
   yoloPanel: "Yolo Panel",
@@ -590,11 +623,11 @@ const en: Record<string, string> = {
   deselectAll: "Deselect All",
   showReasoning: "Show Reasoning",
   showModelInfo: "Model Info",
-  showUnisonInfo: "Unison Info",
+  showUnicodaInfo: "Unicoda Info",
   showLicense: "License",
   showAnchors: "Generate TOC",
   modelInfo: "Model",
-  unisonVersion: "Version",
+  UnicodaVersion: "Version",
   licenseNote: "This record is released under Apache 2.0 License for personal reference only.",
   tocTitle: "Table of Contents",
   // File Upload
@@ -642,6 +675,18 @@ const en: Record<string, string> = {
   internetSearchBlocked: "⚠️ Internet Search is Disabled\n\nThe user has turned off the \"Internet Search Permission\" in Unicoda settings, so the web_search module cannot be executed.\n\nYou can explain the situation to the user and ask how they'd like to proceed:\n\n1. **If the user wants to search**: Suggest enabling \"Internet Search Permission\" in the Settings panel\n2. **If the user does not want to enable search**: Ask if they'd like you to answer based on your existing knowledge\n\nNote: You cannot enable this permission for the user — they need to toggle it manually in the interface.",
   // Collapsible SearXNG
   searxngExpand: "Expand SearXNG Settings",
+  // UnicodaPlus
+  plusService: "Unicoda Plus Service",
+  plusServiceDesc: "When enabled, Unicoda starts a local TCP server that allows other applications (e.g., Pompeii music player) to connect and communicate via the UnicodaPlus protocol.",
+  plusEnable: "Enable Plus Service",
+  plusStatusRunning: "Running",
+  plusStatusStopped: "Stopped",
+  plusPort: "Port",
+  plusConnectedClients: "Connected Clients",
+  plusNoClients: "No connected clients",
+  plusClientApp: "App",
+  plusClientCapabilities: "Capabilities",
+  plusClientConnected: "Connected At",
   // Reset Confirmation
   resetSettings: "Reset Settings",
   resetSettingsConfirm: "Reset all appearance and behavior settings (privacy and model config unaffected)?",
@@ -664,6 +709,15 @@ const en: Record<string, string> = {
   securityDenyRound: "Deny all this round",
   securityAutoAll: "Auto-approve all",
   securityApprovalRemember: "Remember this choice for this session",
+  // XMemory
+  xmemoryCards: "cards",
+  xmemoryCreate: "New Memory Card",
+  xmemoryEmpty: "No memory cards. Click the button above to create one.",
+  xmemoryImport: "Import",
+  xmemoryExportAll: "Export All",
+  xmemoryExport: "Export",
+  xmemoryBound: "Bound",
+  xmemoryUnbound: "Unbound",
 };
 
 // ── 德语 ──
@@ -721,7 +775,7 @@ const de: Record<string, string> = {
   contextPin: "Anheften",
   contextUnpin: "Loslösen",
   contextDelete: "Löschen",
-  inputPlaceholder: "Starten Sie eine Sitzung mit Unison",
+  inputPlaceholder: "Starten Sie eine Sitzung mit Unicoda",
   aiDisclaimer: "KI-generierte Inhalte dienen nur als Referenz",
   modeNotSupported: " (Bald verfügbar)",
   modelService: "Modell-Dienst",
@@ -735,15 +789,15 @@ const de: Record<string, string> = {
   advParams: "Erweiterte Parameter",
   delete: "Löschen",
   disclaimerTitle: "Haftungsausschluss",
-  disclaimerFee: "Die Verbindung zu den APIs der Modellanbieter verursacht Kosten. Die Gebühren werden ausschließlich von den jeweiligen Anbietern festgelegt und stehen in keinem Zusammenhang mit Unison.",
+  disclaimerFee: "Die Verbindung zu den APIs der Modellanbieter verursacht Kosten. Die Gebühren werden ausschließlich von den jeweiligen Anbietern festgelegt und stehen in keinem Zusammenhang mit Unicoda.",
   disclaimerSecurity: "Der Benutzer trägt die volle Verantwortung für Verluste durch Netzangriffe, Datenlecks oder andere Sicherheitsvorfälle während der Nutzung.",
-  disclaimerLegal: "Der Benutzer darf Unison nicht für Hacking, die Entwicklung von Schadsoftware, die Verletzung der Rechte Dritter oder andere illegale Aktivitäten nutzen.",
-  disclaimerNeutral: "Als technisches Framework wahrt Unison technologische Neutralität.",
+  disclaimerLegal: "Der Benutzer darf Unicoda nicht für Hacking, die Entwicklung von Schadsoftware, die Verletzung der Rechte Dritter oder andere illegale Aktivitäten nutzen.",
+  disclaimerNeutral: "Als technisches Framework wahrt Unicoda technologische Neutralität.",
   // Privacy Service
   privacyService: "Datenschutzdienst",
   privacyDesc: "Wenn aktiviert, können Sie den Sperrdienst nutzen, um Ihre Desktop-Privatsphäre vor neugierigen Blicken zu schützen. Die Sperre deckt nur den Arbeitsbereich ab; laufende Aufgaben werden nicht unterbrochen.",
   privacyWarningTitle: "Sicherheitshinweis",
-  privacyWarning: "Der Sperrdienst von Unison dient ausschließlich dem Schutz Ihrer Privatsphäre auf dem Desktop. Er bietet KEINE echte Sicherheit – der Passwort-Hash wird lokal gespeichert, und jeder mit physischem Zugriff auf Ihr Gerät kann ihn umgehen. Verlassen Sie sich NICHT auf diese Funktion zum Schutz sensibler oder vertraulicher Informationen.",
+  privacyWarning: "Der Sperrdienst von Unicoda dient ausschließlich dem Schutz Ihrer Privatsphäre auf dem Desktop. Er bietet KEINE echte Sicherheit – der Passwort-Hash wird lokal gespeichert, und jeder mit physischem Zugriff auf Ihr Gerät kann ihn umgehen. Verlassen Sie sich NICHT auf diese Funktion zum Schutz sensibler oder vertraulicher Informationen.",
   privacyEnable: "Datenschutzdienst aktivieren",
   privacyDisabled: "Datenschutzdienst ist deaktiviert",
   privacyEnabled: "Datenschutzdienst ist aktiviert",
@@ -767,7 +821,7 @@ const de: Record<string, string> = {
   lockDisabled: "Sperrdienst ist nicht aktiviert",
   lockShortcutHint: "Tastenkombination: Strg + F12",
   lockStartupLock: "Passwort beim Start erforderlich",
-  lockStartupLockDesc: "Wenn aktiviert, verlangt Unison beim Start ein Passwort, um die Hauptoberfläche zu betreten.",
+  lockStartupLockDesc: "Wenn aktiviert, verlangt Unicoda beim Start ein Passwort, um die Hauptoberfläche zu betreten.",
   lockIdleTimeout: "Automatische Sperre bei Inaktivität",
   lockIdleTimeoutLabel: "Sperren nach",
   lockIdleTimeoutUnit: "Minuten Inaktivität",
@@ -882,6 +936,12 @@ const de: Record<string, string> = {
   cookieClearConfirm: "Alle gespeicherten Such-Cookies löschen? Bei der nächsten Suche wird eine neue Sitzung erstellt.",
   cookieCleared: "Cookies gelöscht",
   cookieUpdated: "Zuletzt aktualisiert",
+  // Cache Clear
+  cacheClear: "Cache leeren",
+  cacheClearDesc: "Den localStorage-Sitzungscache leeren. Die Konversationsliste zeigt nur auf der Festplatte gespeicherte Sitzungen an.",
+  cacheClearBtn: "Cache leeren",
+  cacheClearConfirm: "Sind Sie sicher, dass Sie alle Cache-Daten löschen möchten? Die Festplattendaten werden nicht beeinträchtigt.",
+  cacheCleared: "Cache geleert, Seite wird neu geladen...",
   // Yolo Panel
   yoloWelcome: "We talk, We code.",
   yoloPanel: "Yolo-Bereich",
@@ -900,11 +960,11 @@ const de: Record<string, string> = {
   deselectAll: "Alle abwählen",
   showReasoning: "Reasoning anzeigen",
   showModelInfo: "Modellinfo",
-  showUnisonInfo: "Unison-Info",
+  showUnicodaInfo: "Unicoda-Info",
   showLicense: "Lizenz",
   showAnchors: "Inhaltsverzeichnis generieren",
   modelInfo: "Modell",
-  unisonVersion: "Version",
+  UnicodaVersion: "Version",
   licenseNote: "Dieser Datensatz wird unter der Apache 2.0-Lizenz nur für den persönlichen Gebrauch veröffentlicht.",
   tocTitle: "Inhaltsverzeichnis",
   // File Upload
@@ -952,6 +1012,18 @@ const de: Record<string, string> = {
   internetSearchBlocked: "⚠️ Internetsuche ist deaktiviert\n\nDer Benutzer hat die \"Internetsuchberechtigung\" in den Unicoda-Einstellungen deaktiviert, daher kann das web_search-Modul nicht ausgeführt werden.\n\nSie können dem Benutzer die Situation erklären und fragen, wie er fortfahren möchte:\n\n1. **Wenn der Benutzer suchen möchte**: Schlagen Sie vor, die \"Internetsuchberechtigung\" im Einstellungsbereich zu aktivieren\n2. **Wenn der Benutzer die Suche nicht aktivieren möchte**: Fragen Sie, ob er möchte, dass Sie auf der Grundlage Ihres vorhandenen Wissens antworten\n\nHinweis: Sie können diese Berechtigung nicht für den Benutzer aktivieren - er muss sie manuell in der Benutzeroberfläche umschalten.",
   // Collapsible SearXNG
   searxngExpand: "SearXNG-Einstellungen erweitern",
+  // UnicodaPlus
+  plusService: "Unicoda Plus-Dienst",
+  plusServiceDesc: "Wenn aktiviert, startet Unicoda einen lokalen TCP-Server, der es anderen Anwendungen (z.B. Pompeii Musikplayer) ermöglicht, über das UnicodaPlus-Protokoll zu kommunizieren.",
+  plusEnable: "Plus-Dienst aktivieren",
+  plusStatusRunning: "Läuft",
+  plusStatusStopped: "Gestoppt",
+  plusPort: "Port",
+  plusConnectedClients: "Verbundene Clients",
+  plusNoClients: "Keine verbundenen Clients",
+  plusClientApp: "App",
+  plusClientCapabilities: "Fähigkeiten",
+  plusClientConnected: "Verbunden seit",
   // Reset Confirmation
   resetSettings: "Einstellungen zurücksetzen",
   resetSettingsConfirm: "Alle Darstellungs- und Verhaltenseinstellungen zurücksetzen (Datenschutz und Modellkonfiguration bleiben erhalten)?",
@@ -974,36 +1046,45 @@ const de: Record<string, string> = {
   securityDenyRound: "Diese Runde ablehnen",
   securityAutoAll: "Alle genehmigen",
   securityApprovalRemember: "Auswahl für diese Sitzung merken",
+  // XMemory
+  xmemoryCards: "Karten",
+  xmemoryCreate: "Neue Speicherkarte",
+  xmemoryEmpty: "Keine Speicherkarten. Klicken Sie oben, um eine zu erstellen.",
+  xmemoryImport: "Importieren",
+  xmemoryExportAll: "Alle exportieren",
+  xmemoryExport: "Exportieren",
+  xmemoryBound: "Gebunden",
+  xmemoryUnbound: "Ungebunden",
 };
 
 // ── 日语（最小字典，仅需在偏好语言中使用的键） ──
 const jaMinimal: Record<string, string> = {
-  inputPlaceholder: "Unison にセッションを開始",
+  inputPlaceholder: "Unicoda にセッションを開始",
 };
 
 // ── 法语（最小字典） ──
 const frMinimal: Record<string, string> = {
-  inputPlaceholder: "Démarrer une session avec Unison",
+  inputPlaceholder: "Démarrer une session avec Unicoda",
 };
 
 // ── 西班牙语（最小字典） ──
 const esMinimal: Record<string, string> = {
-  inputPlaceholder: "Iniciar una sesión con Unison",
+  inputPlaceholder: "Iniciar una sesión con Unicoda",
 };
 
 // ── 英语（英国）（最小字典） ──
 const enGBMinimal: Record<string, string> = {
-  inputPlaceholder: "Start a session with Unison",
+  inputPlaceholder: "Start a session with Unicoda",
 };
 
 // ── 英语（澳大利亚）（最小字典） ──
 const enAUMinimal: Record<string, string> = {
-  inputPlaceholder: "Start a session with Unison",
+  inputPlaceholder: "Start a session with Unicoda",
 };
 
 // ── 英语（印度）（最小字典） ──
 const enINMinimal: Record<string, string> = {
-  inputPlaceholder: "Start a session with Unison",
+  inputPlaceholder: "Start a session with Unicoda",
 };
 
 registerLocale("zh-CN", zh);

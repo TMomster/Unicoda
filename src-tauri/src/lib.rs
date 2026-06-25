@@ -179,6 +179,78 @@ mod credential_manager {
     }
 }
 
+// ─── UnicodaPlus ───────────────────────────────────────────────────────
+
+mod unicodaplus;
+
+use unicodaplus::server::PlusServerManager;
+use unicodaplus::ServerStatus;
+
+static PLUS_SERVER: std::sync::OnceLock<PlusServerManager> = std::sync::OnceLock::new();
+
+fn get_plus_server() -> &'static PlusServerManager {
+    PLUS_SERVER.get_or_init(|| PlusServerManager::new())
+}
+
+/// 读取 UnicodaPlus 设置（是否启用）
+fn read_plus_enabled(app_handle: &tauri::AppHandle) -> bool {
+    let dir = match app_handle.path().app_data_dir() {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let path = dir.join("unicodaplus-settings.json");
+    if !path.exists() {
+        return false;
+    }
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("enabled").and_then(|e| e.as_bool()))
+        .unwrap_or(false)
+}
+
+/// 写入 UnicodaPlus 设置
+fn write_plus_enabled(app_handle: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let dir = app_handle.path().app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("创建数据目录失败: {}", e))?;
+    let settings = serde_json::json!({ "enabled": enabled });
+    std::fs::write(
+        dir.join("unicodaplus-settings.json"),
+        serde_json::to_string_pretty(&settings).unwrap(),
+    )
+    .map_err(|e| format!("写入设置文件失败: {}", e))?;
+    Ok(())
+}
+
+/// 获取 UnicodaPlus 服务器状态
+#[tauri::command]
+fn plus_get_status(app_handle: tauri::AppHandle) -> ServerStatus {
+    let enabled = read_plus_enabled(&app_handle);
+    get_plus_server().get_status(enabled)
+}
+
+/// 启用/禁用 UnicodaPlus 服务器
+#[tauri::command]
+fn plus_set_enabled(enabled: bool, app_handle: tauri::AppHandle) -> Result<ServerStatus, String> {
+    let server = get_plus_server();
+
+    if enabled {
+        // 启动服务器
+        server.start()?;
+        write_plus_enabled(&app_handle, true)?;
+        eprintln!("[PlusServer] 已启用 (端口 {})", server.port.lock().unwrap().unwrap_or(0));
+    } else {
+        // 停止服务器
+        server.stop();
+        write_plus_enabled(&app_handle, false)?;
+        eprintln!("[PlusServer] 已禁用");
+    }
+
+    Ok(server.get_status(enabled))
+}
+
 // ─── Tauri Commands ────────────────────────────────────────────────────
 
 /// 从后端发起 HTTP GET 请求（绕过 WebView CORS 限制）。
@@ -1068,6 +1140,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .setup(|app| {
+            // 启动时自动检查并启用 Plus 服务（如果之前已启用）
+            let enabled = read_plus_enabled(&app.handle());
+            if enabled {
+                let server = get_plus_server();
+                match server.start() {
+                    Ok(port) => eprintln!("[PlusServer] 启动时自动启用在端口 {}", port),
+                    Err(e) => eprintln!("[PlusServer] 启动时自动启用失败: {}", e),
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             http_fetch,
             save_config,
@@ -1091,6 +1175,8 @@ pub fn run() {
             read_file_content,
             execute_command,
             run_code_sandbox,
+            plus_get_status,
+            plus_set_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -241,6 +241,8 @@ export default function InputBar({ onSend, onStop, disabled, messages, memoryMes
   useEffect(() => {
     if (prevDisabledRef.current === true && disabled === false) {
       textareaRef.current?.focus();
+      // 父组件完成处理后释放同步锁，允许下一次发送
+      sendingRef.current = false;
     }
     prevDisabledRef.current = disabled;
   }, [disabled]);
@@ -250,6 +252,8 @@ export default function InputBar({ onSend, onStop, disabled, messages, memoryMes
   const [candidateFiles, setCandidateFiles] = useState<FileAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
+  /** 同步锁：防止因 React 状态异步更新导致短时间内重复发送消息 */
+  const sendingRef = useRef(false);
 
   const startClose = () => {
     if (!modeOpen && !modelOpen) return;
@@ -307,7 +311,7 @@ export default function InputBar({ onSend, onStop, disabled, messages, memoryMes
     el.style.height = targetHeight + "px";
   }, [text, expanded]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = text.trim();
     // 合并时按文件名+大小去重，避免同一文件通过不同路径同时出现在两个数组中
     const seen = new Set<string>();
@@ -320,12 +324,19 @@ export default function InputBar({ onSend, onStop, disabled, messages, memoryMes
       const key = file.name + '_' + file.size;
       if (!seen.has(key)) { seen.add(key); allFiles.push(file); }
     }
-    if ((!trimmed && allFiles.length === 0) || disabled) return;
-    onSend(trimmed, mode, allFiles.length > 0 ? allFiles : undefined);
+    if ((!trimmed && allFiles.length === 0) || disabled || sendingRef.current) return;
+    sendingRef.current = true;
+    // 先清空输入（UI 响应），再异步等待发送完成
     setText("");
     setExpanded(false);
     setCandidateFiles([]);
     onClearPendingFiles?.();
+    try {
+      await onSend(trimmed, mode, allFiles.length > 0 ? allFiles : undefined);
+    } finally {
+      // 无论 onSend 是否触发流（如未知命令提前 return），都释放同步锁
+      sendingRef.current = false;
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -512,16 +512,59 @@ function SecurityApprovalCard({ toolName, t, yolo, done, result }: { toolName: s
 }
 
 // ── Unicoda Framework 消息卡片（嵌入栏风格，类似 Security） ──
-function FrameworkCard({ content, yolo }: { content: string; yolo?: boolean }) {
-  const isUp = content.includes("满意") && !content.includes("不满意");
-  const color = isUp ? "#22c55e" : "#ef4444";
+function FrameworkCard({ content, yolo, isRatingEval }: { content: string; yolo?: boolean; isRatingEval?: boolean }) {
+  // 仅对评价反馈消息显示满意/不满意标记，其他 framework 消息（如 /sys）显示中性图标
+  if (isRatingEval) {
+    const isUp = content.includes("满意") && !content.includes("不满意");
+    const color = isUp ? "#22c55e" : "#ef4444";
+    return (
+      <div
+        style={{
+          borderRadius: "8px",
+          border: yolo
+            ? `1px solid ${color}${Math.round(0.3 * 255).toString(16).padStart(2, "0")}`
+            : `1px solid ${color}44`,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "8px 12px",
+            fontSize: "12px",
+            fontWeight: 600,
+            userSelect: "none",
+            color,
+            background: yolo
+              ? `${color}${Math.round(0.06 * 255).toString(16).padStart(2, "0")}`
+              : `${color}${Math.round(0.04 * 255).toString(16).padStart(2, "0")}`,
+          }}
+        >
+          {isUp ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+            </svg>
+          )}
+          <span style={{ color: yolo ? "rgba(255,255,255,0.55)" : "var(--c-t3)", fontWeight: 400 }}>
+            {isUp ? "满意" : "不满意"}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // 非评价消息（如 /sys 系统指令）— 显示中性信息图标 + 正文
   return (
     <div
       style={{
         borderRadius: "8px",
-        border: yolo
-          ? `1px solid ${color}${Math.round(0.3 * 255).toString(16).padStart(2, "0")}`
-          : `1px solid ${color}44`,
+        border: `1px solid ${yolo ? "rgba(99,102,241,0.3)" : "rgba(99,102,241,0.25)"}`,
         overflow: "hidden",
       }}
     >
@@ -534,24 +577,32 @@ function FrameworkCard({ content, yolo }: { content: string; yolo?: boolean }) {
           fontSize: "12px",
           fontWeight: 600,
           userSelect: "none",
-          color,
+          color: "#818cf8",
           background: yolo
-            ? `${color}${Math.round(0.06 * 255).toString(16).padStart(2, "0")}`
-            : `${color}${Math.round(0.04 * 255).toString(16).padStart(2, "0")}`,
+            ? "rgba(99,102,241,0.06)"
+            : "rgba(99,102,241,0.04)",
         }}
       >
-        {isUp ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
-          </svg>
-        )}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
         <span style={{ color: yolo ? "rgba(255,255,255,0.55)" : "var(--c-t3)", fontWeight: 400 }}>
-          {isUp ? "满意" : "不满意"}
+          系统消息
         </span>
+      </div>
+      <div
+        style={{
+          padding: "10px 14px",
+          fontSize: "13px",
+          lineHeight: 1.6,
+          color: yolo ? "rgba(255,255,255,0.7)" : "var(--c-t1)",
+          userSelect: "text",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {content}
       </div>
     </div>
   );
@@ -1236,7 +1287,7 @@ export default function MessageBubble({ message, modelName, userName, userAvatar
               )}
             </div>
           ) : isFramework ? (
-            <FrameworkCard content={message.content} yolo={yolo} />
+            <FrameworkCard content={message.content} yolo={yolo} isRatingEval={message.isRatingEval} />
           ) : (
             <div>
               {useMarkdown ? (

@@ -104,7 +104,91 @@ export interface Conversation {
   autoTitleDone?: boolean;
   /** Yolo 模式下每个会话独立记录的工作区路径。为空时使用全局 sessionPath。 */
   workspacePath?: string;
+  /** 由 /system 命令注入的活跃系统指令。独立于 messages/memoryMessages 数组，
+   * 不受压缩或数组同步问题影响。buildApiMessages 会将其合并到主 system prompt。 */
+  activeSystemInstruction?: string;
+  /** 绑定的 XMemory 特化记忆卡 ID（每个会话只能绑定一张，一次绑定不可更改） */
+  boundXMemoryCardId?: string;
 }
+
+// ── XMemory 特化记忆类型 (v5) ────────────────────────────────────
+
+/** 记忆颗粒类型 */
+export type GranuleType = "abstract" | "concrete";
+
+/** 单颗记忆颗粒，卡片内部管理的基本记忆单元 */
+export interface XMemoryGranule {
+  /** 唯一编号：4 位数字字符串（如 "3742"），不与所属卡片中其他颗粒编号冲突 */
+  id: string;
+  /** 颗粒标题（由模型自主命名） */
+  title: string;
+  /** 颗粒类型：abstract=抽象感知（长期记忆），concrete=具象感知（当下环境记忆） */
+  type: GranuleType;
+  /** 重要级别 */
+  importance: "high" | "medium" | "low";
+  /** 记忆内容（结构化 Markdown，由模型自主编辑） */
+  content: string;
+  /** 创建时间戳 */
+  createdAt: number;
+  /** 最后修改时间戳 */
+  updatedAt: number;
+}
+
+/** 特化记忆卡，作为容器管理多个记忆颗粒 */
+export interface XMemoryCard {
+  /** 唯一编号：4 位数字字符串（如 "3742"），不与现有编号冲突 */
+  id: string;
+  /** 用户可读的标题 */
+  title: string;
+  /** 可选的描述信息 */
+  description: string;
+  /** 创建时间戳 */
+  createdAt: number;
+  /** 最后修改时间戳 */
+  updatedAt: number;
+  /** 是否启用（禁用后不注入 system prompt，模型不主动读取） */
+  enabled: boolean;
+  /** 本卡管理的记忆颗粒列表 */
+  granules: XMemoryGranule[];
+  /** 已被删除/释放的颗粒 ID 集合，用于回收复用 */
+  releasedGranuleIds: string[];
+}
+
+/** 会话-记忆卡绑定记录（独立于卡片存储，实现"一个会话绑定一张卡，一张卡可被多会话绑定"） */
+export interface XMemoryBinding {
+  /** 会话 ID */
+  sessionId: string;
+  /** 绑定的记忆卡 ID */
+  cardId: string;
+  /** 绑定时间戳 */
+  boundAt: number;
+}
+
+/** XMemory 持久化存储结构 (v5) */
+export interface XMemoryStore {
+  version: 5;
+  cards: XMemoryCard[];
+  /** 会话绑定列表（独立的顶级数组，不再嵌入卡片内） */
+  bindings: XMemoryBinding[];
+  /** 已被删除/释放的卡片 ID 集合，用于回收复用 */
+  releasedIds: string[];
+}
+
+/** XMemory 导出格式（不含 id 和绑定信息，可安全分享） */
+export interface XMemoryCardExport {
+  title: string;
+  description: string;
+  granules: Omit<XMemoryGranule, "id">[];
+  exportedAt: number;
+  /** 导出格式版本 */
+  version: number;
+}
+
+// 向后兼容：保留旧类型别名
+/** @deprecated 使用 XMemoryBinding 替代 */
+export type SessionBinding = XMemoryBinding;
+/** @deprecated 使用 XMemoryCardExport 替代 */
+export type MemoryCardExport = XMemoryCardExport;
 
 export interface ModelParams {
   temperature: number;

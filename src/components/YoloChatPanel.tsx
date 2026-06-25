@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import type { Message, FileAttachment } from "../types";
 import MessageBubble from "./MessageBubble";
 import SecurityBubble from "./SecurityBubble";
@@ -13,8 +13,10 @@ interface Props {
   developerMode?: boolean;
   t: (key: string) => string;
   onPreviewFile?: (file: FileAttachment) => void;
-  /** 用户对消息评价回调（点赞/点踩） */
-  onRate?: (messageId: string, rating: "up" | "down") => void;
+  /** 用户对消息评价回调（点赞/点踩，null 取消评价） */
+  onRate?: (messageId: string, rating: "up" | "down" | null) => void;
+  /** 撤回本轮消息回调 */
+  onRecall?: (messageId: string) => void;
   /** 模型正在生成中 */
   isStreaming?: boolean;
 }
@@ -36,6 +38,7 @@ export default function YoloChatPanel({
   t,
   onPreviewFile,
   onRate,
+  onRecall,
   isStreaming,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -70,6 +73,23 @@ export default function YoloChatPanel({
     setShowScrollBtn(false);
   }, []);
 
+  // 计算每一轮的结束索引和最后一条 assistant 消息索引
+  const { lastAssistantIdx, roundEndIndices, latestRoundEndIdx } = useMemo(() => {
+    let lastAsst = -1;
+    const roundEnds = new Set<number>();
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") { lastAsst = i; break; }
+    }
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].role === "assistant" && (i === messages.length - 1 || messages[i + 1].role === "user")) {
+        roundEnds.add(i);
+      }
+    }
+    let latest = -1;
+    for (const idx of roundEnds) { if (idx > latest) latest = idx; }
+    return { lastAssistantIdx: lastAsst, roundEndIndices: roundEnds, latestRoundEndIdx: latest };
+  }, [messages]);
+
   return (
     <div
       style={{
@@ -90,7 +110,7 @@ export default function YoloChatPanel({
           padding: "0 24px",
         }}>
           <SecurityBubble t={t} />
-          {messages.map((msg) => (
+          {messages.map((msg, idx) => (
             <MessageBubble
               key={msg.id}
               message={msg}
@@ -104,6 +124,10 @@ export default function YoloChatPanel({
               yolo
               onPreviewFile={onPreviewFile}
               onRate={onRate}
+              onRecall={onRecall}
+              isLastAssistant={idx === lastAssistantIdx}
+              isRoundEnd={roundEndIndices.has(idx)}
+              isLatestRound={idx === latestRoundEndIdx}
             />
           ))}
           {(() => {

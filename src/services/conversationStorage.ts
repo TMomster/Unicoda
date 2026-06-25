@@ -157,9 +157,13 @@ export async function flushConversationData(
   // 2. 写当前活跃会话的消息文件
   if (activeConv) {
     await saveLiteralMessages(activeConv.id, activeConv.messages, mode, sessionPath);
+    // memoryMessages 为 [] 时回退到 messages，避免空数组被持久化到磁盘
+    const memToSave = (activeConv.memoryMessages && activeConv.memoryMessages.length > 0)
+      ? activeConv.memoryMessages
+      : activeConv.messages;
     await saveMemoryMessages(
       activeConv.id,
-      activeConv.memoryMessages ?? activeConv.messages,
+      memToSave,
       mode,
       sessionPath,
     );

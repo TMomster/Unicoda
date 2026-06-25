@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { Conversation, FileAttachment, Message, Mode, PanelMode, ModelConfig } from "./types";
+import type { Conversation, FileAttachment, Message, Mode, PanelMode } from "./types";
 import { useTheme, scaleToTransform } from "./contexts/ThemeContext";
 import { useModels } from "./contexts/ModelContext";
 import { ModelProvider } from "./contexts/ModelContext";
@@ -41,7 +41,6 @@ import PrintDialog from "./components/PrintDialog";
 import FilePreviewPanel from "./components/FilePreviewPanel";
 
 let nextConvId = 1;
-let nextMsgId = 1;
 
 const MIN_SIDEBAR = 200;
 
@@ -73,7 +72,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
           const loaded: Conversation[] = metas.map((m) => ({
             ...m,
             messages: [],
-            memoryMessages: [],
+            memoryMessages: undefined,
           }));
           for (const c of loaded) {
             const idNum = parseInt(c.id, 10);
@@ -88,7 +87,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         id: String(nextConvId++),
         title: makeConvTitle([], locale),
         messages: [],
-        memoryMessages: [],
+        memoryMessages: undefined,
         pinned: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -97,6 +96,13 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
   });
 
   const [activeId, setActiveId] = useState<string>("");
+
+  // 保持 lastActiveConversationId 同步到 config，供 builtin 模组读取当前会话 ID
+  useEffect(() => {
+    if (activeId && sessionPath) {
+      writeConfigFile("lastActiveConversationId", activeId, sessionPath).catch(() => {});
+    }
+  }, [activeId, sessionPath]);
 
   // ── 版本检查对话框 ──
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
@@ -119,7 +125,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         const loaded: Conversation[] = freshMetas.map((m) => ({
           ...m,
           messages: [],
-          memoryMessages: [],
+          memoryMessages: undefined,
         }));
         for (const c of loaded) {
           const idNum = parseInt(c.id, 10);
@@ -151,7 +157,10 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
               ? {
                   ...c,
                   messages: literalMsgs ?? c.messages,
-                  memoryMessages: memoryMsgs ?? literalMsgs ?? c.messages,
+                  // 从磁盘加载时 memoryMsgs 可能为 []（旧版缺陷），此时回退到 literalMsgs
+                  memoryMessages: (memoryMsgs && memoryMsgs.length > 0)
+                    ? memoryMsgs
+                    : (literalMsgs ?? c.messages),
                 }
               : c,
           ),
@@ -228,7 +237,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         id: newId,
         title: makeConvTitle(prev, locale),
         messages: [],
-        memoryMessages: [],
+        memoryMessages: undefined,
         pinned: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -274,7 +283,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
           id: String(nextConvId++),
           title: makeConvTitle(conversations, locale),
           messages: [],
-          memoryMessages: [],
+          memoryMessages: undefined,
           pinned: false,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -306,7 +315,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
           id: String(nextConvId++),
           title: makeConvTitle(conversations, locale),
           messages: [],
-          memoryMessages: [],
+          memoryMessages: undefined,
           pinned: false,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -413,12 +422,28 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
    * 在流式生成过程中，两个数组应保持同步；压缩时只修改 memoryMessages。
    */
   const withMsgUpdate = useCallback(
-    (conv: Conversation, msgMapper: (msgs: Message[]) => Message[]): Conversation => ({
-      ...conv,
-      messages: msgMapper(conv.messages),
-      memoryMessages: msgMapper(conv.memoryMessages ?? conv.messages),
-      updatedAt: Date.now(),
-    }),
+    (conv: Conversation, msgMapper: (msgs: Message[]) => Message[]): Conversation => {
+      const newMessages = msgMapper(conv.messages);
+      let newMemoryMessages: Message[];
+      if (conv.memoryMessages) {
+        if (conv.memoryMessages.length === conv.messages.length) {
+          // 长度相同：索引安全，直接应用变换
+          newMemoryMessages = msgMapper(conv.memoryMessages);
+        } else {
+          // 长度不同（已压缩）：用 ID 匹配过滤，避免索引错位
+          const survivingIds = new Set(newMessages.map((m) => m.id));
+          newMemoryMessages = conv.memoryMessages.filter((m) => survivingIds.has(m.id));
+          if (newMemoryMessages.length === 0) {
+            newMemoryMessages = newMessages.filter((m) => !m.id.startsWith("sys_inject_"));
+          }
+        }
+      } else {
+        // 先在完整 messages 上应用变换，再过滤 sys_inject_，
+        // 避免预过滤导致两数组长度不同、索引错位
+        newMemoryMessages = newMessages.filter((m) => !m.id.startsWith("sys_inject_"));
+      }
+      return { ...conv, messages: newMessages, memoryMessages: newMemoryMessages, updatedAt: Date.now() };
+    },
     [],
   );
 
@@ -650,9 +675,19 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
     const blockedFKeys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 拦截 F-键
+      // 显式处理 Alt+F4：通过 Tauri 关闭窗口（覆盖所有状态，包括锁定界面）
+      if (e.altKey && e.key === "F4") {
+        e.preventDefault();
+        e.stopPropagation();
+        import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+          getCurrentWindow().close();
+        });
+        return;
+      }
+
+      // 拦截 F-键（放行 Alt+F4，保留系统窗口关闭行为）
       const fNum = parseInt(e.key.slice(1), 10);
-      if (e.key.startsWith("F") && !isNaN(fNum) && blockedFKeys.includes(fNum)) {
+      if (e.key.startsWith("F") && !isNaN(fNum) && blockedFKeys.includes(fNum) && !e.altKey) {
         e.preventDefault();
         return;
       }
@@ -710,6 +745,18 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
         --c-bd: #d4d4d8;   --c-bd2: #c8c8cc;
         --c-ac: #2563eb;   --c-ah: #1d4ed8;     --c-bf: #2563eb;
       }
+      /* Yolo 模式下锁定界面背景/前景与对应极光色一致（主题切换影响极光色调 → 同时切换背景色） */
+      [data-theme][data-yolo="true"] {
+        --c-bg: #050008;   --c-bg2: #120021;   --c-bg3: #1e0038;
+        --c-txt: #e0e0e0;  --c-t2: #a0a0a0;     --c-t3: #7a7a7e;
+        --c-t4: #5a5a5e;   --c-t5: #6a6a6e;     --c-t6: #8a8a8e;
+        --c-bd: #2a0a2e;   --c-bd2: #3a1a3e;
+        --c-ac: #2563eb;   --c-ah: #1d4ed8;     --c-bf: #2563eb;
+      }
+      [data-theme="light"][data-yolo="true"] {
+        --c-bg: #08081e;   --c-bg2: #0f1a2e;   --c-bg3: #1a2a42;
+        --c-bd: #1a2a40;   --c-bd2: #2a3a50;
+      }
     `}</style>
   );
 
@@ -737,7 +784,8 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
 
   return (
     <div
-      data-theme={panelMode === "Yolo" ? "dark" : theme}
+      data-theme={theme}
+      data-yolo={panelMode === "Yolo" ? "true" : undefined}
       style={{
         width: `${100 / transformScale}vw`,
         height: `${100 / transformScale}vh`,
@@ -810,7 +858,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
             >
               {/* Messages */}
               {activeConv ? (
-                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} onRate={handleRateMessage} onRecall={handleRecallMessage} isStreaming={chatStream.isStreaming} />
+                <ChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} onRate={handleRateMessage} onRecall={handleRecallMessage} isStreaming={chatStream.streamingBySession[activeId] ?? false} />
               ) : (
                 <div
                   style={{
@@ -831,8 +879,8 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
                 <InputBar
                   key={activeId}
                   onSend={handleSendWrapper}
-                  onStop={chatStream.handleStop}
-                  disabled={chatStream.isStreaming}
+                  onStop={() => chatStream.handleStop(activeId)}
+                  disabled={chatStream.streamingBySession[activeId] ?? false}
                   messages={activeConv.messages}
                   memoryMessages={activeConv.memoryMessages ?? activeConv.messages}
                   maxTokens={selectedModel?.params?.maxTokens}
@@ -938,7 +986,7 @@ function MainContent({ panelMode, setPanelMode }: { panelMode: PanelMode; setPan
       )}
 
       {/* ── Lock overlay (inside data-theme root so --c-bg resolves) ── */}
-      <LockOverlay locale={locale} yolo={panelMode === "Yolo"} />
+      <LockOverlay locale={locale} />
 
       {/* ── 版本升级公告 ── */}
       {showUpdateDialog && (

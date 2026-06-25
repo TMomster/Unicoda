@@ -5,8 +5,14 @@ import { useEffect, useRef } from "react";
  * Uses CSS @keyframes animations for gradient shifts instead of
  * JS-driven requestAnimationFrame, offloading animation to the
  * compositor thread for much better performance.
+ *
+ * @param theme - "light" → bright blue aurora, "dark" → dark purple aurora
  */
-export default function AuroraBackground() {
+interface Props {
+  theme?: "dark" | "light";
+}
+
+export default function AuroraBackground({ theme = "dark" }: Props) {
   const idRef = useRef<string>(`aurora-${Math.random().toString(36).slice(2, 8)}`);
   const id = idRef.current;
 
@@ -44,6 +50,8 @@ export default function AuroraBackground() {
     };
   }, [id]);
 
+  const isLight = theme === "light";
+
   return (
     <div
       style={{
@@ -54,15 +62,17 @@ export default function AuroraBackground() {
         contain: "paint style layout",
       }}
     >
-      {/* Brighter base layer — richer blues & purples */}
+      {/* Base gradient layer */}
       <div
         style={{
           position: "absolute",
           inset: 0,
-          background: "linear-gradient(135deg, #0d2b5e 0%, #1a4a7a 25%, #2a6a9a 50%, #5a3a7a 75%, #1a2a4a 100%)",
+          background: isLight
+            ? "linear-gradient(135deg, #0d2b5e 0%, #1a4a7a 25%, #2a6a9a 50%, #5a3a7a 75%, #1a2a4a 100%)"
+            : "linear-gradient(135deg, #050008 0%, #120021 25%, #1e0038 50%, #140028 75%, #0a0015 100%)",
         }}
       />
-      {/* Aurora spot 1 — icy blue (larger, more visible) */}
+      {/* Aurora spot 1 */}
       <div
         style={{
           position: "absolute",
@@ -71,13 +81,15 @@ export default function AuroraBackground() {
           left: "-25vw",
           top: "-25vw",
           borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(60, 200, 255, 0.35) 0%, transparent 70%)",
+          background: isLight
+            ? "radial-gradient(circle, rgba(60, 200, 255, 0.35) 0%, transparent 70%)"
+            : "radial-gradient(circle, rgba(90, 30, 160, 0.35) 0%, transparent 70%)",
           animation: `aurora-drift-${id}-1 12s ease-in-out infinite`,
           willChange: "transform",
           pointerEvents: "none",
         }}
       />
-      {/* Aurora spot 2 — violet (brighter) */}
+      {/* Aurora spot 2 */}
       <div
         style={{
           position: "absolute",
@@ -86,14 +98,16 @@ export default function AuroraBackground() {
           right: "-15vw",
           bottom: "-15vw",
           borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(220, 100, 255, 0.30) 0%, transparent 70%)",
+          background: isLight
+            ? "radial-gradient(circle, rgba(220, 100, 255, 0.30) 0%, transparent 70%)"
+            : "radial-gradient(circle, rgba(150, 50, 200, 0.30) 0%, transparent 70%)",
           animation: `aurora-drift-${id}-2 16s ease-in-out infinite`,
           willChange: "transform",
           pointerEvents: "none",
           mixBlendMode: "screen",
         }}
       />
-      {/* Aurora spot 3 — cyan (brighter) */}
+      {/* Aurora spot 3 */}
       <div
         style={{
           position: "absolute",
@@ -102,7 +116,9 @@ export default function AuroraBackground() {
           left: "25vw",
           top: "35vh",
           borderRadius: "50%",
-          background: "radial-gradient(circle, rgba(0, 255, 220, 0.25) 0%, transparent 70%)",
+          background: isLight
+            ? "radial-gradient(circle, rgba(0, 255, 220, 0.25) 0%, transparent 70%)"
+            : "radial-gradient(circle, rgba(100, 20, 180, 0.20) 0%, transparent 70%)",
           animation: `aurora-drift-${id}-3 14s ease-in-out infinite`,
           willChange: "transform",
           pointerEvents: "none",

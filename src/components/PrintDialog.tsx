@@ -48,6 +48,20 @@ const roleColors: Record<string, string> = {
   system: "#f59e0b",
 };
 
+/** 获取消息的显示名，优先根据 sender 判断框架/安全消息 */
+function getMessageLabel(msg: Message, userName?: string, modelName?: string): string {
+  if (msg.sender === "framework" || msg.isCalibration) return "Unicoda Framework";
+  if (msg.role === "user") return userName || "你";
+  if (msg.role === "assistant") return modelName || "Unicoda";
+  return roleLabels[msg.role] || msg.role;
+}
+
+/** 获取消息的角色色 */
+function getMessageColor(msg: Message): string {
+  if (msg.sender === "framework" || msg.isCalibration) return "#818cf8";
+  return roleColors[msg.role] || "#888";
+}
+
 const colorSchemeNames: Record<ColorScheme, string> = {
   white: "白色",
   black: "黑色",
@@ -162,6 +176,7 @@ export default function PrintDialog({
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const exportBtnRef = useRef<HTMLButtonElement>(null);
+  const [copied, setCopied] = useState(false);
 
   // 点击外部关闭导出菜单
   useEffect(() => {
@@ -209,7 +224,7 @@ export default function PrintDialog({
         lines.push("");
 
         for (const msg of selectedMsgs) {
-          const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unicoda");
+          const label = getMessageLabel(msg, userName, modelName);
           const ts = new Date(msg.timestamp).toLocaleString("zh-CN", {
             month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
           });
@@ -266,7 +281,7 @@ export default function PrintDialog({
         lines.push("");
 
         for (const msg of selectedMsgs) {
-          const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unicoda");
+          const label = getMessageLabel(msg, userName, modelName);
           const ts = new Date(msg.timestamp).toLocaleString("zh-CN", {
             month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
           });
@@ -370,6 +385,27 @@ export default function PrintDialog({
     },
     [buildExportContent],
   );
+
+  const handleCopy = useCallback(() => {
+    const content = buildExportContent("txt");
+    if (!content) return;
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      // 降级：旧浏览器 fallback
+      const textarea = document.createElement("textarea");
+      textarea.value = content;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [buildExportContent]);
 
   // 打开时自动滚动到底部（最新消息）
   useEffect(() => {
@@ -478,6 +514,7 @@ export default function PrintDialog({
           .print-message-user { background: #0a1428; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-assistant { background: #0a1a0f; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-tool { background: #140a24; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          .print-message-framework { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.3); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 10pt; }
           .print-role-label { font-weight: 700; }
           .print-timestamp { color: #6a6a6e; font-size: 9pt; }
@@ -515,6 +552,7 @@ export default function PrintDialog({
           .print-message-user { background: rgba(10, 20, 40, 0.7); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-assistant { background: rgba(10, 26, 15, 0.7); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-tool { background: rgba(20, 10, 36, 0.7); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          .print-message-framework { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.3); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 10pt; }
           .print-role-label { font-weight: 700; }
           .print-timestamp { color: #6a6a6e; font-size: 9pt; }
@@ -552,6 +590,7 @@ export default function PrintDialog({
           .print-message-user { background: #f0f7ff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-assistant { background: #f6fdf6; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-tool { background: #f5f0ff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          .print-message-framework { background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .print-message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 10pt; }
           .print-role-label { font-weight: 700; }
           .print-timestamp { color: #999; font-size: 9pt; }
@@ -593,7 +632,7 @@ export default function PrintDialog({
     if (showAnchors) {
       const tocItems = selectedMsgs
         .map((msg, i) => {
-          const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unicoda");
+          const label = getMessageLabel(msg, userName, modelName);
           const preview = stripMarkdown(msg.content).slice(0, 50);
           return `<li><a href="#msg-${i}">${escapeHtml(label)}: ${escapeHtml(preview)}</a></li>`;
         })
@@ -604,7 +643,7 @@ export default function PrintDialog({
     // ── 消息列表 ──
     const messageHtml = selectedMsgs
       .map((msg, i) => {
-        const label = msg.role === "user" ? (userName || "你") : (modelName || roleLabels[msg.role] || "Unicoda");
+        const label = getMessageLabel(msg, userName, modelName);
         const ts = new Date(msg.timestamp).toLocaleString("zh-CN", {
           month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
         });
@@ -681,9 +720,9 @@ export default function PrintDialog({
         }
         const anchorAttr = showAnchors ? ` id="msg-${i}"` : "";
         return `
-          <div class="print-message print-message-${msg.role}"${anchorAttr}>
+          <div class="print-message print-message-${msg.sender === "framework" || msg.isCalibration ? "framework" : msg.role}"${anchorAttr}>
             <div class="print-message-header">
-              <span class="print-role-label" style="color: ${roleColors[msg.role] || "#888"}">${escapeHtml(label)}</span>
+              <span class="print-role-label" style="color: ${escapeHtml(getMessageColor(msg))}">${escapeHtml(label)}</span>
               <span class="print-timestamp">${ts}</span>
             </div>
             ${tagsHtml}
@@ -860,6 +899,22 @@ export default function PrintDialog({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", position: "relative" }}>
           <button
+            onClick={handleCopy}
+            disabled={selectedCount === 0}
+            style={{
+              background: copied ? "var(--c-accent, #22c55e)" : "transparent",
+              border: `1px solid ${copied ? "var(--c-accent, #22c55e)" : "var(--c-bd2)"}`,
+              color: copied ? "#fff" : selectedCount > 0 ? "var(--c-txt)" : "var(--c-t4)",
+              padding: "6px 12px",
+              borderRadius: "4px",
+              fontSize: "13px",
+              cursor: selectedCount > 0 ? "pointer" : "default",
+              transition: "all 0.15s",
+            }}
+          >
+            {copied ? "已复制 ✓" : "复制 📋"}
+          </button>
+          <button
             ref={exportBtnRef}
             onClick={() => setShowExportMenu((v) => !v)}
             disabled={selectedCount === 0}
@@ -1025,7 +1080,7 @@ export default function PrintDialog({
           )}
           {displayMessages.map((msg, index) => {
             const isSelected = selectedIds.has(msg.id);
-            const label = msg.role === "user" ? (userName || "你") : (msg.role === "assistant" ? (modelName || "Unicoda") : (roleLabels[msg.role] || msg.role));
+            const label = getMessageLabel(msg, userName, modelName);
             return (
               <div
                 key={msg.id}
@@ -1052,7 +1107,7 @@ export default function PrintDialog({
                       style={{
                         fontSize: "11px",
                         fontWeight: 700,
-                        color: roleColors[msg.role] || "#888",
+                        color: getMessageColor(msg),
                       }}
                     >
                       {label}

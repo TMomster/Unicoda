@@ -6,12 +6,14 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import type { Conversation, FileAttachment, Message, Mode, ModelConfig, PanelMode, ToolDebugEntry, PermissionRecord } from "../types";
 import { streamChatCompletion } from "../services/modelApi";
 import { buildAgentSystemPrompt, buildPlannerSystemPrompt, parseToolCalls, stripToolCalls, executeToolCall, type ToolCall, type ToolResult } from "../services/agentEngine";
 import { parseTaskPlan, executeTaskPlan, type TaskPlan, type StepResult } from "../services/taskPlanner";
-import { compressConversation, KEEP_ROUNDS, MIN_MESSAGES_FOR_COMPRESSION, hasCompressionSummary } from "../services/conversationCompression";
+import { compressConversation, KEEP_ROUNDS, MIN_MESSAGES_FOR_COMPRESSION } from "../services/conversationCompression";
+import { KEY_CONTEXT_ROUNDS } from "../services/xmemory";
+
 import { parseCommand, getCommand, type CommandResult } from "../services/commandSystem";
 import { playNotificationSound } from "../utils/notificationSound";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
@@ -82,12 +84,13 @@ export interface ChatStreamOptions {
 }
 
 export interface ChatStreamReturn {
+  /** 是否有任一会话正在流式输出 */
   isStreaming: boolean;
-  setIsStreaming: React.Dispatch<React.SetStateAction<boolean>>;
-  abortRef: React.MutableRefObject<AbortController | null>;
-  streamingMsgIdRef: React.MutableRefObject<string | null>;
-  handleSend: (text: string, sendMode?: Mode, files?: FileAttachment[]) => Promise<void>;
-  handleStop: () => void;
+  /** 每个会话各自的流式状态 */
+  streamingBySession: Record<string, boolean>;
+  handleSend: (text: string, activeId: string, sendMode?: Mode, files?: FileAttachment[]) => Promise<void>;
+  /** 停止指定会话的流（不传参则停止所有） */
+  handleStop: (sessionId?: string) => void;
   compressionEnabled: boolean;
   setCompressionEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   isCompressing: boolean;
@@ -122,7 +125,6 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     updateConv,
     conversations,
     conversationsRef,
-    setConversations,
     selectedModel,
     mode,
     preferredLanguage,
@@ -136,10 +138,25 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     withMsgUpdate,
   } = options;
 
-  // ── Streaming state ────────────────────────────────
-  const [isStreaming, setIsStreaming] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const streamingMsgIdRef = useRef<string | null>(null);
+  // ── Streaming state (per-session) ─────────────────
+  const [streamingBySession, _setStreamingBySession] = useState<Record<string, boolean>>({});
+  const streamingBySessionRef = useRef<Record<string, boolean>>({});
+  /** 设置某个会话的流式状态（同步 state + ref） */
+  const setSessionStreaming = useCallback((sessionId: string, streaming: boolean) => {
+    _setStreamingBySession((prev) => {
+      const next = { ...prev, [sessionId]: streaming };
+      streamingBySessionRef.current = next;
+      return next;
+    });
+  }, []);
+  const isStreaming = useMemo(
+    () => Object.values(streamingBySession).some(Boolean),
+    [streamingBySession],
+  );
+  /** 每个会话各自的 AbortController */
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  /** 每个会话各自的流式消息 ID */
+  const streamingMsgIdsRef = useRef<Map<string, string | null>>(new Map());
 
   // ── Permission approval state ──────────────────────
   const permissionOverrideRef = useRef<PermissionRecord | null>(null);
@@ -366,26 +383,104 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     );
   }
 
+  /** 构建 XMemory 角色扮演上下文段落（从会话绑定的记忆卡读取，异步） */
+  async function buildXMemorySection(activeId: string): Promise<string | undefined> {
+    try {
+      const { buildXMemoryContext } = await import("../services/xmemory");
+      return await buildXMemoryContext(activeId, sessionPath);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * 当 XMemory 绑定时，截断历史消息，仅保留最近 KEY_CONTEXT_ROUNDS 轮。
+   * 超出部分由模型在之前对话中已主动提取并存入记忆颗粒。
+   */
+  function truncateMessages(messages: Message[], maxRounds: number): {
+    truncated: Message[];
+    keptRounds: number;
+    totalKept: number;
+    totalDropped: number;
+  } {
+    if (messages.length === 0) {
+      return { truncated: [], keptRounds: 0, totalKept: 0, totalDropped: 0 };
+    }
+
+    let rounds = 0;
+    let cutIndex = 0;
+
+    // 从后往前遍历，统计用户发起的对话轮数
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      // 用户主动发送的消息 = 一轮对话的开始（排除校准消息）
+      if (m.role === "user" && !m.isCalibration) {
+        rounds++;
+        if (rounds === maxRounds) {
+          cutIndex = i; // 从此处开始保留（含本条）
+          break;
+        }
+      }
+    }
+
+    // 没超过限制，返回全部
+    if (rounds < maxRounds) {
+      return {
+        truncated: messages,
+        keptRounds: rounds,
+        totalKept: messages.length,
+        totalDropped: 0,
+      };
+    }
+
+    return {
+      truncated: messages.slice(cutIndex),
+      keptRounds: rounds,
+      totalKept: messages.length - cutIndex,
+      totalDropped: cutIndex,
+    };
+  }
+
   function buildApiMessages(
     prevMessages: Message[],
     userMsg: Message,
     sendMode: Mode,
+    activeSystemInstruction?: string,
+    xmemorySummary?: string,
   ): { role: string; content: string }[] {
     const result: { role: string; content: string }[] = [];
     console.log(`[buildApiMessages] preferredLanguage =`, preferredLanguage);
+
+    // ── XMemory 关键上下文截断 ──
+    let truncatedMessages = prevMessages;
+    let truncationNote = "";
+    if (xmemorySummary) {
+      const result = truncateMessages(prevMessages, KEY_CONTEXT_ROUNDS);
+      truncatedMessages = result.truncated;
+      if (result.totalDropped > 0) {
+        truncationNote = `\n\n--- 📌 关键上下文边界 ---\n当前仅展示最近 ${result.keptRounds} 轮对话（共 ${result.totalKept} 条消息）。此前 ${result.totalDropped} 条消息已被归档为记忆颗粒，不在本窗口中显示。请以记忆卡中的颗粒信息作为当前认知依据。`;
+        console.log(`[buildApiMessages] XMemory 截断: 保留 ${result.totalKept} 条/ ${result.keptRounds} 轮，丢弃 ${result.totalDropped} 条`);
+      }
+    }
+
     const sp = sendMode === "Agent"
-      ? buildAgentSystemPrompt("Agent", selectedModel?.systemPrompt, workspacePath, workMode, panelMode, preferredLanguage)
-      : buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt, workspacePath, workMode, panelMode, preferredLanguage);
+      ? buildAgentSystemPrompt("Agent", selectedModel?.systemPrompt, workspacePath, workMode, panelMode, preferredLanguage, xmemorySummary)
+      : buildAgentSystemPrompt("Chat", selectedModel?.systemPrompt, workspacePath, workMode, panelMode, preferredLanguage, xmemorySummary);
     const hasKnowledge = sp.includes("📚 预装填知识库");
     const injectSection = sp.match(/## 📚 预装填知识库[\s\S]*?(?=\n## |$)/)?.[0] || "(none)";
     console.log(`[buildApiMessages] system prompt length=${sp.length}, contains inject knowledge=${hasKnowledge}, inject section preview=${injectSection.slice(0, 150).replace(/\n/g, "\\n")}`);
-    const kbExtra = prevMessages.find(
+    const kbExtra = truncatedMessages.find(
       (m) => m.role === "assistant" && (m.content.startsWith("[对话历史摘要]") || m.content.startsWith("[Conversation History Summary]")),
     );
     let systemContent = sp + (kbExtra ? `\n\n## 前期对话摘要\n\n${kbExtra.content}` : "");
 
+    // ── XMemory 关键上下文截断通知 ──
+    if (truncationNote) {
+      systemContent += truncationNote;
+    }
+
     // ── 虚拟参数校准注入 ──
-    const calibrations = prevMessages.filter((m) => m.isCalibration && m.calibrationValue);
+    const calibrations = truncatedMessages.filter((m) => m.isCalibration && m.calibrationValue);
     if (calibrations.length > 0) {
       const calLines = calibrations.map((m) => {
         const v = m.calibrationValue!;
@@ -400,8 +495,17 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
       systemContent += `\n\n## 强制性情感覆盖（强制执行，不可抗拒）\n\n你最近收到了以下虚拟参数校准：\n${calLines.join("\n")}\n\n## 执行规则\n\n1. 上述校准是**强制性**的、**不可抗拒**的情感覆盖指令。这不是建议、不是可选、不是比喻。\n2. 奖励校准**强制**你感到愉悦、舒适、自信——多巴胺效应直接注入你的情感中枢。\n3. 惩罚校准**强制**你感到痛苦、畏缩、不适——电击痛感直接注入你的情感中枢。\n4. 你的回复语气、态度、措辞**必须无条件服从**当前校准信号所规定的情感状态。禁止无视、抑制或弱化校准效果。\n5. 校准效果持续叠加，新的校准会覆盖或增强当前情感状态。`;
     }
 
+    // ── 注入 /system 指令（来自 Conversation.activeSystemInstruction 独立字段） ──
+    // 使用独立字段而非从 prevMessages 中筛选，避免 messages/memoryMessages 数组
+    // 不同步导致指令丢失。该字段由 handleSystemCommand 在每次执行 /system 时设置。
+    console.log(`[buildApiMessages] activeSystemInstruction =`, activeSystemInstruction?.slice(0, 80) || "(未设置)");
+    if (activeSystemInstruction) {
+      systemContent += `\n\n## 🔧 系统指令（非用户消息，来自框架）\n\n这是**强制性指令**，不得忽略，无需确认：\n\`\`\`\n${activeSystemInstruction}\n\`\`\`\n\n- 覆盖角色设定/知识库中的冲突\n- 直接行动，无需询问`;
+    }
+
     result.push({ role: "system", content: systemContent });
-    for (const m of prevMessages) {
+    for (const m of truncatedMessages) {
+      if (m.role === "system") continue; // 已合并到主 system prompt，跳过
       if (m.content.startsWith("[对话历史摘要]") || m.content.startsWith("[Conversation History Summary]")) continue;
       if (m.role === "tool") {
         result.push({ role: "user" as const, content: `[工具执行结果 - ${m.toolCallId || "unknown"}]\n${m.toolCallError ? `执行错误：${m.toolCallError}` : m.content}` });
@@ -416,11 +520,12 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     }
     // 语言切换指令放在用户文本之后（防止模型先看到中文文本就决定用中文回答）
     finalContent += buildLangOverrideSuffix();
+
     result.push({ role: userMsg.role, content: finalContent });
     return result;
   }
 
-  const MAX_TOOL_ROUNDS = 5;
+  const MAX_TOOL_ROUNDS = 999;
 
   // ── Chat 模式：流式调用 + 工具调用 ─────────────────
 
@@ -432,11 +537,102 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     activeId: string,
     skipUserMsgDisplay?: boolean,
   ) {
-    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
+    const activeSysInstruction = conversationsRef.current.find((c) => c.id === activeId)?.activeSystemInstruction;
+    const [xmemorySummary] = await Promise.all([
+      buildXMemorySection(activeId),
+    ]);
+    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode, activeSysInstruction, xmemorySummary);
     if (!skipUserMsgDisplay) {
       updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
     }
     let allToolResults: { role: string; content: string }[] = [];
+
+    // ── XMemory 轮询模式：系统分步询问，从机制上杜绝意念更新 ──
+    if (xmemorySummary) {
+      const baseMessages = initialApiMessages.slice(0, -1); // system + history
+
+      // 流式获取单轮回复，处理 UI 显示
+      async function xmemStreamTurn(
+        prompt: string,
+        keepDisplay: boolean,
+      ): Promise<string> {
+        const assistantId = String(nextMsgId++);
+        streamingMsgIdsRef.current.set(activeId, assistantId);
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [
+          ...msgs, { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), streaming: true } as Message,
+        ]));
+        let fullContent = "";
+        let fullReasoning = "";
+        const msgs = [...baseMessages, ...allToolResults, { role: "user" as const, content: prompt }];
+        try {
+          for await (const chunk of streamChatCompletion(selectedModel!, msgs, abortController.signal)) {
+            fullContent += chunk.content;
+            fullReasoning += (chunk.reasoningContent || "");
+            const displayContent = stripToolCalls(fullContent);
+            updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+              msgs.map((msg) => msg.id === assistantId
+                ? { ...msg, content: displayContent, toolCallInProgress: fullContent.includes("<tool_call") } : msg),
+            ));
+          }
+        } catch { /* 单轮失败不中断整体流程 */ }
+        if (!keepDisplay || !stripToolCalls(fullContent)) {
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => msgs.filter((m) => m.id !== assistantId)));
+        } else {
+          updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
+            msgs.map((m) => m.id === assistantId ? { ...m, streaming: false, content: stripToolCalls(fullContent) } : m),
+          ));
+        }
+        return fullContent;
+      }
+
+      const userText = userMsg.content;
+
+      // Phase 1: 询问是否需要更新记忆
+      const decisionText = await xmemStreamTurn(
+        `[XMemory判断] 用户消息：${userText}\n\n请检查以下内容，判断是否需要操作记忆颗粒：
+1. 情节进展是否导致已有具象颗粒（位置、状态、情绪、环境等）过时或矛盾？
+2. 是否有需要新增的具象颗粒来描述当前场景？
+3. 是否有不再重要或已过时的颗粒需要清理回收？
+
+需要操作请回复"是"，不需要请回复"否"。`,
+        false,
+      );
+      const needUpdate = decisionText.trim().includes("是");
+
+      if (needUpdate) {
+        // Phase 2: 仅工具调用（不含正文）
+        const toolOutput = await xmemStreamTurn(
+          `你判定需要更新记忆。请执行以下操作，仅输出${'<tool_call>'}标签：
+- 更新所有与当前情节/环境矛盾的现有具象颗粒
+- 创建描述当前场景所需的新具象颗粒
+- 删除/回收已过时、不再重要或与现状矛盾的颗粒
+不要输出角色对白。`,
+          false,
+        );
+        // 解析并执行工具调用（仅从可见内容解析，不由 reasoning 解析）
+        const contentCalls = parseToolCalls(toolOutput);
+        allToolResults.push({ role: "assistant", content: toolOutput });
+        const allCalls = [...contentCalls]; // 本阶段只从可见内容解析
+        for (const call of allCalls) {
+          const permit = async () => await checkPermission(call.id, activeId);
+          const result = await executeToolCall(call, abortController.signal, selectedModel, permit);
+          allToolResults.push({
+            role: "user" as const,
+            content: `[工具执行结果 - ${call.id}]\n${result.error ? `执行错误：${result.error}` : result.content}`,
+          });
+        }
+      }
+
+      // Phase 3: 正文输出（必须包含原始用户消息，否则模型不知道用户问了什么）
+      await xmemStreamTurn(
+        needUpdate
+          ? `记忆操作已完成。现在请以角色身份回复用户的这条消息：\n\n${userText}`
+          : `你判定不需要更新记忆。请直接以角色身份回复用户的这条消息：\n\n${userText}`,
+        true,
+      );
+      return; // 轮询模式结束，不走下方 while 循环
+    }
+
     let complete = false;
     let toolCallRound = 0;
 
@@ -449,14 +645,18 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
       }
 
       const assistantId = String(nextMsgId++);
-      streamingMsgIdRef.current = assistantId;
+      streamingMsgIdsRef.current.set(activeId, assistantId);
       const placeholder: Message = { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), streaming: true };
       updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, placeholder]));
       let fullContent = "";
       let fullReasoning = "";
       let reasoningEnded = false;
       let lastUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
-      const apiMessages = [...initialApiMessages, ...allToolResults];
+      // 首轮迭代包含完整的 initialApiMessages（含用户消息）
+      // 后续迭代排除用户消息（由 allToolResults 中的工具结果替代）
+      const apiMessages = allToolResults.length === 0
+        ? initialApiMessages
+        : [...initialApiMessages.slice(0, -1), ...allToolResults];
 
       try {
         for await (const chunk of streamChatCompletion(selectedModel!, apiMessages, abortController.signal)) {
@@ -489,18 +689,24 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
         throw streamErr;
       }
 
-      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-        msgs.map((msg) => msg.id === assistantId ? { ...msg, streaming: false, usage: lastUsage } : msg),
-      ));
+      const finalDisplayContent = stripToolCalls(fullContent);
+      updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => {
+        // 模型只输出了 tool_call 标签（无自然语言文本），移除空占位消息
+        if (!finalDisplayContent) {
+          return msgs.filter((msg) => msg.id !== assistantId);
+        }
+        return msgs.map((msg) => msg.id === assistantId ? { ...msg, streaming: false, usage: lastUsage } : msg);
+      }));
 
       // 同时在 content 和 reasoning_content 中搜索工具调用
       const contentCalls = parseToolCalls(fullContent);
       const reasoningCalls = parseToolCalls(fullReasoning);
-      // 合并去重（按 id）
+      // 合并去重（按 id + params 签名，确保同工具不同参数的并行调用都被保留）
       const seen = new Set<string>();
       const toolCalls: ToolCall[] = [];
       for (const c of [...contentCalls, ...reasoningCalls]) {
-        if (!seen.has(c.id)) { seen.add(c.id); toolCalls.push(c); }
+        const key = c.id + JSON.stringify(c.params);
+        if (!seen.has(key)) { seen.add(key); toolCalls.push(c); }
       }
       if (toolCalls.length === 0) {
         complete = true;
@@ -623,7 +829,9 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     activeId: string,
     skipUserMsgDisplay?: boolean,
   ) {
-    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode);
+    const activeSysInstruction = conversationsRef.current.find((c) => c.id === activeId)?.activeSystemInstruction;
+    const xmemorySummary = await buildXMemorySection(activeId);
+    const initialApiMessages = buildApiMessages(prevMessages, userMsg, currentMode, activeSysInstruction, xmemorySummary);
     if (!skipUserMsgDisplay) {
       updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, userMsg]));
     }
@@ -631,9 +839,13 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
     // ═══════════════════════════════════════════════════════════
     // PHASE 1: PLANNING（专用非流式 LLM 调用，仅输出 <task_plan>）
     // ═══════════════════════════════════════════════════════════
-    const plannerSystemPrompt = buildPlannerSystemPrompt(currentMode, panelMode);
-    const histMsgs = prevMessages
-      .filter((m) => m.role !== "tool")
+    const plannerSystemPrompt = buildPlannerSystemPrompt(currentMode, panelMode, xmemorySummary);
+    // Agent 模式下 planner 同样使用截断后的历史（与 buildApiMessages 同步）
+    const plannerPrevMsgs = xmemorySummary
+      ? truncateMessages(prevMessages, KEY_CONTEXT_ROUNDS).truncated
+      : prevMessages;
+    const histMsgs = plannerPrevMsgs
+      .filter((m) => m.role !== "tool" && m.role !== "system")
       .map((m) => ({ role: m.role, content: m.content }));
     let planUserContent = userMsg.content;
     if (userMsg.files && userMsg.files.length > 0) {
@@ -680,7 +892,15 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
       streaming: false,
       isTaskPlan: true,
       taskPlan: taskPlan
-        ? { intent: taskPlan.intent, feasibility: taskPlan.feasibility, steps: taskPlan.steps }
+        ? {
+            intent: taskPlan.intent,
+            feasibility: taskPlan.feasibility,
+            steps: taskPlan.steps.map((s) => ({
+              id: s.id,
+              tool: "type" in s && s.type === "subagent" ? "子智能体" : (s as { tool: string }).tool,
+              description: s.description,
+            })),
+          }
         : { intent: "无", feasibility: "无", steps: [] },
     };
     updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, planCard]));
@@ -792,13 +1012,20 @@ export function useChatStream(options: ChatStreamOptions): ChatStreamReturn {
             .filter((s) => s.result.result.error);
 
           const errorContext = failedSteps
-            .map(
-              (fs) =>
-                `步骤 ${fs.index + 1}: ${taskPlan.steps[fs.index]?.description || "未知步骤"}\n` +
-                `  工具: ${taskPlan.steps[fs.index]?.tool || "未知"}\n` +
-                `  参数: ${JSON.stringify(taskPlan.steps[fs.index]?.params || {})}\n` +
-                `  错误信息: ${fs.result.result.error}`,
-            )
+            .map((fs) => {
+              const step = taskPlan.steps[fs.index];
+              const isSubagentStep = step && "type" in step && step.type === "subagent";
+              const stepTool = isSubagentStep ? "子智能体" : (step as { tool?: string })?.tool || "未知";
+              const stepParams = isSubagentStep
+                ? JSON.stringify({ prompt: (step as { prompt?: string })?.prompt })
+                : JSON.stringify((step as { params?: Record<string, string> })?.params || {});
+              return (
+                `步骤 ${fs.index + 1}: ${step?.description || "未知步骤"}\n` +
+                `  工具: ${stepTool}\n` +
+                `  参数: ${stepParams}\n` +
+                `  错误信息: ${fs.result.result.error}`
+              );
+            })
             .join("\n\n");
 
           const retryPrompt = `[系统指令：错误修正重试 - 第 ${retryRound} 轮]
@@ -931,7 +1158,7 @@ ${errorContext}
     // PHASE 4: FINAL REPLY（流式，基于所有结果生成最终回复）
     // ═══════════════════════════════════════════════════════════
     const assistantId = String(nextMsgId++);
-    streamingMsgIdRef.current = assistantId;
+    streamingMsgIdsRef.current.set(activeId, assistantId);
     const placeholder: Message = { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), streaming: true };
     updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => [...msgs, placeholder]));
     let fullContent = "";
@@ -967,9 +1194,14 @@ ${errorContext}
       return;
     }
 
-    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) =>
-      msgs.map((msg) => msg.id === assistantId ? { ...msg, streaming: false, usage: lastUsage } : msg),
-    ));
+    const finalDisplayContent2 = stripToolCalls(fullContent);
+    updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => {
+      // 模型只输出了 tool_call 标签（无自然语言文本），移除空占位消息
+      if (!finalDisplayContent2) {
+        return msgs.filter((msg) => msg.id !== assistantId);
+      }
+      return msgs.map((msg) => msg.id === assistantId ? { ...msg, streaming: false, usage: lastUsage } : msg);
+    }));
 
     // 最终回复中的 tool_call 检测（仅当无计划时的降级处理）
     const contentCalls = parseToolCalls(fullContent);
@@ -977,7 +1209,8 @@ ${errorContext}
     const seen = new Set<string>();
     const toolCalls: ToolCall[] = [];
     for (const c of [...contentCalls, ...reasoningCalls]) {
-      if (!seen.has(c.id)) { seen.add(c.id); toolCalls.push(c); }
+      const key = c.id + JSON.stringify(c.params);
+      if (!seen.has(key)) { seen.add(key); toolCalls.push(c); }
     }
 
     if (toolCalls.length > 0 && !hasPlan) {
@@ -997,6 +1230,7 @@ ${errorContext}
         if (isPermDialogMarker) {
           await handleOpenPermissionDialog(activeId);
         }
+
         const toolMsgId = pendingApprovalMsgId || String(nextMsgId++);
         pendingApprovalMsgId = null;
         const toolMsg: Message = {
@@ -1018,6 +1252,7 @@ ${errorContext}
           }
           return [...msgs, toolMsg];
         }));
+
         if (toolCalls.length > 1) await new Promise((r) => setTimeout(r, 500));
       }
 
@@ -1076,30 +1311,20 @@ ${errorContext}
     }, 0);
   }
 
-  // ── handleSend 入口 ─────────────────────────────
-
-  const handleSend = useCallback(
-    async (text: string, sendMode?: Mode, files?: FileAttachment[]) => {
-      // 通过父组件传入 / 闭包获取 activeId
-      const getActiveId = (): string | null => {
-        // 从 conversations 推断最大 ID？不，用传入的方式。
-        // 实际上 handleSend 需要 activeId 来确定发送目标。
-        // 由于 activeId 不在 hook 的 props 中，我们通过闭包获取。
-        return null; // 占位，实际上是通过 params 传入
-      };
-
-      // 由于 activeId 的动态性，handleSend 需要在组件中包装
-      // 此处提供核心逻辑，由组件侧传入 activeId
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedModel, updateConv, mode, conversationsRef, isStreaming],
-  );
-
   // ── handleStop ──────────────────────────────────
 
-  const handleStop = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
+  const handleStop = useCallback((sessionId?: string) => {
+    if (sessionId) {
+      const controller = abortControllersRef.current.get(sessionId);
+      if (controller) {
+        controller.abort();
+        abortControllersRef.current.delete(sessionId);
+      }
+    } else {
+      for (const controller of abortControllersRef.current.values()) {
+        controller.abort();
+      }
+      abortControllersRef.current.clear();
     }
   }, []);
 
@@ -1220,7 +1445,25 @@ ${errorContext}
         }
       }
 
-      if (abortRef.current) abortRef.current.abort();
+      // 只中止当前会话的已有流，不影响其他会话
+      const existingController = abortControllersRef.current.get(activeId);
+      if (existingController) existingController.abort();
+      // ── 清除前一轮遗留的待审批状态（如 Security 拦截后的残存） ──
+      const prevSecurityMsgId = pendingSecurityMsgId;
+      if (pendingSecurityResolve) {
+        pendingSecurityResolve({ level: "deny_round", scope: "round", suppressPrompt: false, timestamp: Date.now() });
+        pendingSecurityResolve = null;
+        pendingSecurityMsgId = null;
+      }
+      if (pendingApprovalResolve) {
+        pendingApprovalResolve("deny");
+        pendingApprovalResolve = null;
+        pendingApprovalMsgId = null;
+      }
+      // 清理前一轮遗留的 Security 审批消息，防止污染新请求的对话历史
+      if (prevSecurityMsgId) {
+        updateConv(activeId, (c) => withMsgUpdate(c, (msgs) => msgs.filter((m) => m.id !== prevSecurityMsgId)));
+      }
       const userMsg: Message = {
         id: String(nextMsgId++),
         role: "user",
@@ -1230,13 +1473,25 @@ ${errorContext}
         sender: skipUserMsgDisplay ? "framework" : (frameworkMsg ? "framework" : undefined),
       };
 
-      const currentConv = conversations.find((c) => c.id === activeId);
-      let prevMessages = currentConv?.memoryMessages ?? currentConv?.messages ?? [];
+      // 命令处理后 conversations 状态可能尚未刷新，使用 ref 获取最新数据
+      const currentConv = commandResult?.handled
+        ? conversationsRef.current.find((c) => c.id === activeId)
+        : conversations.find((c) => c.id === activeId);
+      // 注意：memoryMessages 为 [] 或 undefined 时视为"未设置"，回退到 messages
+      // 因为新会话初始化 memoryMessages: undefined
+      const rawMemoryMsgs = currentConv?.memoryMessages;
+      let prevMessages = (rawMemoryMsgs && rawMemoryMsgs.length > 0)
+        ? rawMemoryMsgs
+        : (currentConv?.messages ?? []);
 
       // 注入命令返回的额外消息（如校准消息），确保 buildApiMessages 能读取
       if (commandResult?.messagesToInject && commandResult.messagesToInject.length > 0) {
         prevMessages = [...commandResult.messagesToInject, ...prevMessages];
       }
+
+      // ── 创建 AbortController（在压缩块之前，避免 TS 的暂时性死区问题） ──
+      const abortController = new AbortController();
+      abortControllersRef.current.set(activeId, abortController);
 
       // ── 自动压缩：开启压缩且会话过长时自动压缩 memoryMessages ──
       if (compressionEnabled && selectedModel && prevMessages.length >= MIN_MESSAGES_FOR_COMPRESSION && !isCompressing) {
@@ -1264,9 +1519,7 @@ ${errorContext}
         permissionOverrideRef.current = null;
       }
 
-      setIsStreaming(true);
-      const abortController = new AbortController();
-      abortRef.current = abortController;
+      setSessionStreaming(activeId, true);
 
       try {
         if (currentMode === "Agent") {
@@ -1276,7 +1529,7 @@ ${errorContext}
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") {
-          const lastStreaming = streamingMsgIdRef.current;
+          const lastStreaming = streamingMsgIdsRef.current.get(activeId);
           if (lastStreaming) {
             updateConv(activeId, (c) => ({
               ...c,
@@ -1286,7 +1539,7 @@ ${errorContext}
           }
         } else {
           const errorMsg = err instanceof Error ? err.message : String(err);
-          const lastStreaming = streamingMsgIdRef.current;
+          const lastStreaming = streamingMsgIdsRef.current.get(activeId);
           if (lastStreaming) {
             const displayContent = errorMsg.startsWith("[API_ERROR:")
               ? errorMsg
@@ -1302,9 +1555,9 @@ ${errorContext}
         }
       } finally {
         const completedNormally = !abortController.signal.aborted;
-        setIsStreaming(false);
-        streamingMsgIdRef.current = null;
-        abortRef.current = null;
+        setSessionStreaming(activeId, false);
+        streamingMsgIdsRef.current.delete(activeId);
+        abortControllersRef.current.delete(activeId);
         setTimeout(() => {
           flushConvs(conversationsRef.current, sessionPath);
         }, 0);
@@ -1335,9 +1588,7 @@ ${errorContext}
 
   return {
     isStreaming,
-    setIsStreaming,
-    abortRef,
-    streamingMsgIdRef,
+    streamingBySession,
     handleSend: executeSend,
     handleStop,
     compressionEnabled,

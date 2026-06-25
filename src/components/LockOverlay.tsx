@@ -91,7 +91,7 @@ export default function LockOverlay({ locale }: Props) {
           letterSpacing: "2px",
         }}
       >
-        {locale === "zh-CN" ? "Unison 锁定中" : "Unison Locked"}
+        {locale === "zh-CN" ? "Unicoda 锁定中" : "Unicoda Locked"}
       </div>
 
       {/* Password input */}

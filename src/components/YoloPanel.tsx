@@ -18,6 +18,7 @@ import { MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon } from "../constants
 import AuroraBackground from "./AuroraBackground";
 import YoloChatPanel from "./YoloChatPanel";
 import InputBar from "./InputBar";
+import YoloXMemory from "./YoloXMemory";
 import SettingsPanel from "./SettingsPanel";
 import ComponentsPanel from "./ComponentsPanel";
 import FilePreviewPanel from "./FilePreviewPanel";
@@ -388,8 +389,8 @@ function YoloSessionSidebar({ open, onClose, conversations, activeId, onSelect, 
 }
 
 // ── Yolo Header (window controls on right) ─────
-function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenSettings, onOpenComponents, onPrint }: {
-  title: string; onBack: () => void; onToggleSession: () => void; onToggleWorkspace: () => void; onOpenSettings: () => void; onOpenComponents: () => void; onPrint: () => void;
+function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenSettings, onOpenComponents, onPrint, onToggleXMemory, xmemoryActive }: {
+  title: string; onBack: () => void; onToggleSession: () => void; onToggleWorkspace: () => void; onOpenSettings: () => void; onOpenComponents: () => void; onPrint: () => void; onToggleXMemory: () => void; xmemoryActive: boolean;
 }) {
   const [hover, setHover] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -449,6 +450,18 @@ function YoloHeader({ title, onBack, onToggleSession, onToggleWorkspace, onOpenS
           onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.88)"; }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
           <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+        </button>
+        {/* XMemory button */}
+        <button onClick={onToggleXMemory}
+          style={{
+            ...btnBase,
+            color: xmemoryActive ? "rgba(147,51,234,0.9)" : "rgba(255,255,255,0.6)",
+            fontWeight: xmemoryActive ? 700 : 500,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = xmemoryActive ? "#a855f7" : "rgba(255,255,255,0.92)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = xmemoryActive ? "rgba(147,51,234,0.9)" : "rgba(255,255,255,0.6)"; }}
+          title="XMemory 记忆卡管理">
+          <span style={{ fontSize: "15px", letterSpacing: "0.5px" }}>X</span>
         </button>
         <button onClick={onOpenSettings} title="设置" style={btnBase}
           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.92)"; }}
@@ -541,7 +554,7 @@ function YoloWelcome({ subtitle }: { subtitle: string }) {
 interface Props { onBack?: () => void; }
 
 export default function YoloPanel({ onBack }: Props) {
-  const { fontFamily, t, locale, preferredLanguage, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode } = useTheme();
+  const { fontFamily, t, locale, preferredLanguage, userName, userAvatar, sessionPath, defaultMarkdown, defaultReasoningOpen, developerMode, theme } = useTheme();
   const { securityEnabled } = useSecurity();
   const { models, selectedModelId } = useModels();
   const selectedModel = models.find((m) => m.id === selectedModelId);
@@ -550,7 +563,20 @@ export default function YoloPanel({ onBack }: Props) {
   const withMsgUpdate = useCallback((c: Conversation, fn: (msgs: Message[]) => Message[]) => {
     const newMsgs = fn(c.messages);
     const oldMemoryMsgs = c.memoryMessages ?? c.messages;
-    const newMemoryMsgs = fn(oldMemoryMsgs);
+
+    let newMemoryMsgs: Message[];
+    if (c.memoryMessages === undefined || c.memoryMessages.length === c.messages.length) {
+      // 无独立 memoryMessages 或长度相同：索引安全，直接应用变换
+      newMemoryMsgs = fn(oldMemoryMsgs);
+    } else {
+      // 长度不同（已压缩）：用 ID 匹配过滤，避免索引错位
+      const survivingIds = new Set(newMsgs.map((m) => m.id));
+      newMemoryMsgs = c.memoryMessages.filter((m) => survivingIds.has(m.id));
+      if (newMemoryMsgs.length === 0) {
+        newMemoryMsgs = newMsgs;
+      }
+    }
+
     return {
       ...c,
       messages: newMsgs,
@@ -569,7 +595,7 @@ export default function YoloPanel({ onBack }: Props) {
           const loaded: Conversation[] = metas.map((m) => ({
             ...m,
             messages: [],
-            memoryMessages: [],
+            memoryMessages: undefined,
           }));
           for (const c of loaded) {
             const idNum = parseInt(c.id, 10);
@@ -579,7 +605,7 @@ export default function YoloPanel({ onBack }: Props) {
         }
       }
     } catch { /* ignore */ }
-    return [{ id: String(nextConvId++), title: makeConvTitle([], locale), messages: [], memoryMessages: [], pinned: false, createdAt: Date.now(), updatedAt: Date.now() }];
+    return [{ id: String(nextConvId++), title: makeConvTitle([], locale), messages: [], memoryMessages: undefined, pinned: false, createdAt: Date.now(), updatedAt: Date.now() }];
   });
 
   const [activeId, setActiveId] = useState<string>("");
@@ -600,7 +626,7 @@ export default function YoloPanel({ onBack }: Props) {
         const loaded: Conversation[] = freshMetas.map((m) => ({
           ...m,
           messages: [],
-          memoryMessages: [],
+          memoryMessages: undefined,
         }));
         for (const c of loaded) {
           const idNum = parseInt(c.id, 10);
@@ -649,7 +675,10 @@ export default function YoloPanel({ onBack }: Props) {
               ? {
                   ...c,
                   messages: literalMsgs ?? c.messages,
-                  memoryMessages: memoryMsgs ?? literalMsgs ?? c.messages,
+                  // 从磁盘加载时 memoryMsgs 可能为 []（旧版缺陷），此时回退到 literalMsgs
+                  memoryMessages: (memoryMsgs && memoryMsgs.length > 0)
+                    ? memoryMsgs
+                    : (literalMsgs ?? c.messages),
                 }
               : c,
         ),
@@ -685,7 +714,7 @@ export default function YoloPanel({ onBack }: Props) {
         id: newId,
         title: makeConvTitle(prev, locale),
         messages: [],
-        memoryMessages: [],
+        memoryMessages: undefined,
         pinned: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -714,7 +743,7 @@ export default function YoloPanel({ onBack }: Props) {
           id: String(nextConvId++),
           title: makeConvTitle(prev, locale),
           messages: [],
-          memoryMessages: [],
+          memoryMessages: undefined,
           pinned: false,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -756,7 +785,7 @@ export default function YoloPanel({ onBack }: Props) {
           id: String(nextConvId++),
           title: makeConvTitle(prev, locale),
           messages: [],
-          memoryMessages: [],
+          memoryMessages: undefined,
           pinned: false,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -795,6 +824,7 @@ export default function YoloPanel({ onBack }: Props) {
 
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [sessionOpen, setSessionOpen] = useState(false);
+  const [xmemoryActive, setXMemoryActive] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsAnim, setSettingsAnim] = useState<"enter" | "exit">("enter");
   const [componentsOpen, setComponentsOpen] = useState(false);
@@ -1052,37 +1082,55 @@ export default function YoloPanel({ onBack }: Props) {
           to { opacity: 0; }
         }
       `}</style>
-      <AuroraBackground />
+      <AuroraBackground theme={xmemoryActive ? "dark" : theme} />
       <div style={{
         position: "relative", zIndex: 1,
         flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
       }}>
         <div style={{ animation: "yolo-header-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both" }}>
-          <YoloHeader title={activeConv?.title ?? "Unicoda"} onBack={() => onBack?.()} onToggleSession={() => setSessionOpen((v) => !v)} onToggleWorkspace={() => setWorkspaceOpen((v) => !v)} onOpenSettings={openSettings} onOpenComponents={openComponents} onPrint={handlePrint} />
+          <YoloHeader title={activeConv?.title ?? "Unicoda"} onBack={() => onBack?.()} onToggleSession={() => setSessionOpen((v) => !v)} onToggleWorkspace={() => setWorkspaceOpen((v) => !v)} onOpenSettings={openSettings} onOpenComponents={openComponents} onPrint={handlePrint} onToggleXMemory={() => setXMemoryActive((v) => !v)} xmemoryActive={xmemoryActive} />
         </div>
-        <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0 }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0 }}>
           <YoloSessionSidebar open={sessionOpen} onClose={() => setSessionOpen(false)} conversations={conversations} activeId={activeId} onSelect={handleSelect} onCreate={handleCreate} onDelete={handleDelete} onRename={handleRename} onTogglePin={handleTogglePin} onBatchDelete={handleBatchDelete} onBatchTogglePin={handleBatchTogglePin} />
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }} onClick={() => { if (sessionOpen) setSessionOpen(false); }}>
             <WorkspaceDrawer open={workspaceOpen} onClose={() => setWorkspaceOpen(false)} onSelectFolder={handleSelectFolder} workspacePath={activeConv?.workspacePath || ""} />
-            <div style={{
-              flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
-            }}>
-              <div key={activeConv ? `yolo-chat-${activeId}` : "yolo-empty"} style={{
+            {xmemoryActive ? (
+              <div style={{
                 flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
                 animation: "yolo-content-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both",
               }}>
-                {activeConv && activeConv.messages.length > 0 ? (
-                  <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} onRate={handleRateYoloMessage} onRecall={handleRecallYoloMessage} isStreaming={chatStream.isStreaming} />
-                ) : !activeConv ? (
-                  <YoloWelcome subtitle={t("whatToDo")} />
-                ) : (
-                  <YoloWelcome subtitle={t("startNewChat")} />
+                <YoloXMemory
+                  sessionPath={sessionPathRef.current}
+                  t={t}
+                  locale={locale}
+                  userName={userName}
+                  userAvatar={userAvatar}
+                  defaultMarkdown={defaultMarkdown}
+                  defaultReasoningOpen={defaultReasoningOpen}
+                  developerMode={developerMode}
+                />
+              </div>
+            ) : (
+              <div style={{
+                flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
+              }}>
+                <div key={activeConv ? `yolo-chat-${activeId}` : "yolo-empty"} style={{
+                  flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
+                  animation: "yolo-content-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both",
+                }}>
+                  {activeConv && activeConv.messages.length > 0 ? (
+                    <YoloChatPanel messages={activeConv.messages} modelName={selectedModel?.name} userName={userName} userAvatar={userAvatar} defaultMarkdown={defaultMarkdown} defaultReasoningOpen={defaultReasoningOpen} developerMode={developerMode} t={t} onPreviewFile={setPreviewFile} onRate={handleRateYoloMessage} onRecall={handleRecallYoloMessage} isStreaming={chatStream.isStreaming} />
+                  ) : !activeConv ? (
+                    <YoloWelcome subtitle={t("whatToDo")} />
+                  ) : (
+                    <YoloWelcome subtitle={t("startNewChat")} />
+                  )}
+                </div>
+                {activeConv && (
+                  <InputBar key={activeId} onSend={handleSendWrapper} onStop={() => chatStream.handleStop(activeId)} disabled={chatStream.streamingBySession[activeId] ?? false} messages={activeConv.messages} memoryMessages={activeConv.memoryMessages ?? activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={chatStream.compressionEnabled} onToggleCompression={chatStream.handleToggleCompression} onCompressNow={handleCompressNowWrapper} isCompressing={chatStream.isCompressing} mode={mode} onModeChange={setMode} yolo preferredLanguage={preferredLanguage} pendingFiles={chatStream.pendingFiles} onRemovePendingFile={chatStream.handleRemovePendingFile} onClearPendingFiles={chatStream.clearPendingFiles} dragOver={chatStream.dragOver} />
                 )}
               </div>
-              {activeConv && (
-                <InputBar key={activeId} onSend={handleSendWrapper} onStop={chatStream.handleStop} disabled={chatStream.isStreaming} messages={activeConv.messages} memoryMessages={activeConv.memoryMessages ?? activeConv.messages} maxTokens={selectedModel?.params?.maxTokens} compressionEnabled={chatStream.compressionEnabled} onToggleCompression={chatStream.handleToggleCompression} onCompressNow={handleCompressNowWrapper} isCompressing={chatStream.isCompressing} mode={mode} onModeChange={setMode} yolo preferredLanguage={preferredLanguage} pendingFiles={chatStream.pendingFiles} onRemovePendingFile={chatStream.handleRemovePendingFile} onClearPendingFiles={chatStream.clearPendingFiles} dragOver={chatStream.dragOver} />
-              )}
-            </div>
+            )}
           </div>
         </div>
         </div>

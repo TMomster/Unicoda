@@ -27,3 +27,5 @@ import "./builtins/editFile";
 import "./builtins/openPermissionDialog";
 import "./builtins/virtualParameterCalibration";
 import "./builtins/systemMessageFlow";
+import "./builtins/getPlusStatus";
+import "./builtins/xmemoryGranule";

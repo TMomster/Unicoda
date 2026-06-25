@@ -2,7 +2,7 @@
 import re
 
 path = r"g:\CodeBuddySpace\Unison\src\services\knowledgeBase.ts"
-with open(path, "r", encoding="utf-8") as f:
+with open(path, mode="r", encoding="utf-8") as f:
     content = f.read()
 
 # Define retrievalType for each builtin entry by id

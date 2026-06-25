@@ -148,29 +148,32 @@ async function handleSystemCommand(args: string, options: CommandOptions): Promi
     sender: "framework",
   };
 
-  // 同时持久化干净的系统指令，供 buildApiMessages 读取
-  const sysMsg: Message = {
-    id: `sys_inject_${Date.now() + 1}`,
-    role: "system",
-    content: trimmed,
-    timestamp: Date.now(),
-  };
-
-  // 持久化到会话中：先移除旧的系统指令，再追加新的
-  // 避免多条互相矛盾的 system 消息在上下文中堆积
-  options.updateConv(options.activeId, (c) => ({
-    ...c,
-    messages: [...c.messages.filter((m) => !m.id.startsWith("sys_inject_")), displayMsg],
-    memoryMessages: [
-      ...(c.memoryMessages ?? c.messages).filter((m) => !m.id.startsWith("sys_inject_")),
-      sysMsg,
-      displayMsg,
-    ],
+  // 构造更新后的会话对象（一次性计算，避免重复运算）
+  const currentConv = options.conversationsRef.current.find((c) => c.id === options.activeId);
+  const updatedConv: Conversation = {
+    ...currentConv!,
+    // messages — 保留全部历史系统消息流转记录，用户可在聊天中翻阅调整历史
+    messages: [...(currentConv?.messages ?? []), displayMsg],
+    // memoryMessages — 完全不存储调整记录，避免干扰记忆上下文
+    memoryMessages: currentConv?.memoryMessages
+      ? currentConv.memoryMessages.filter((m) => !m.id.startsWith("sys_inject_"))
+      : undefined,
+    // 将干净的系统指令独立存储，脱离 messages/memoryMessages 数组管理，消除同步问题
+    activeSystemInstruction: trimmed,
     updatedAt: Date.now(),
-  }));
+  };
+  // 更新 React 状态（驱动 UI 重新渲染）
+  options.updateConv(options.activeId, () => updatedConv);
+  // 同步更新 ref，确保后续 flushConvs 写入的是最新数据而非 React 重新渲染前的过期数据
+  options.conversationsRef.current = options.conversationsRef.current.map((c) =>
+    c.id === options.activeId ? updatedConv : c,
+  );
 
   console.log("[commandSystem /system] 已注入系统指令（替换旧指令）:", trimmed);
-  return { handled: true };
+  // 触发立即 LLM 响应，让模型根据新指令即时做出调整，无需等用户下一条消息。
+  // 指令内容已存入 system prompt 的 activeSystemInstruction 字段（见 buildApiMessages），
+  // implicitUserMessage 仅作为触发信号，用清晰的元格式避免模型误认为是用户输入。
+  return { handled: true, implicitUserMessage: `（系统指令已生效）${trimmed}` };
 }
 
 registerCommand({

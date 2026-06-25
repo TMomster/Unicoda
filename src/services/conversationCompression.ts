@@ -48,20 +48,38 @@ export async function compressConversation(
   const oldMessages = messages.slice(0, splitIndex);
   const recentMessages = messages.slice(splitIndex);
 
-  // 构建摘要 prompt
+  // 构建摘要 prompt（中英双语，更详细的结构化要求）
   const summaryMessages: { role: string; content: string }[] = [
     {
       role: "system",
       content:
-        "Compress the following conversation into a detailed summary (under 500 words). " +
-        "Preserve ALL of the following:\n" +
-        "- User's requirements, preferences, and customized instructions\n" +
-        "- Persona/character settings requested by the user\n" +
-        "- Key decisions, agreements, and changes in direction\n" +
-        "- Code solutions: languages, frameworks, libraries, approaches used\n" +
-        "- Important facts, names, numbers, or references discussed\n" +
-        "- User feedback or rating (satisfied/dissatisfied) on responses\n" +
-        "Output only the summary text, organized in clear sections.",
+        "You are a memory compression specialist. Compress the following conversation into a structured, detailed summary. " +
+        "Write the summary in Chinese (use English only for technical terms when necessary).\n\n" +
+        "## Mandatory sections to fill:\n" +
+        "### 1. 用户核心需求与偏好\n" +
+        "   - 用户的长期目标、项目方向、反复强调的偏好\n" +
+        "   - 用户对回复风格/格式的偏好（如：要详细/简洁、要代码示例、要中文/英文等）\n\n" +
+        "### 2. 角色/性格设定\n" +
+        "   - 用户要求模型扮演的角色、性格、语气\n" +
+        "   - 任何 /system 或 /sys 注入的系统指令\n\n" +
+        "### 3. 关键决策与协议\n" +
+        "   - 双方达成的重要共识、方向变更\n" +
+        "   - 用户拒绝/否决的内容\n\n" +
+        "### 4. 技术方案与代码（如有）\n" +
+        "   - 使用的语言、框架、库、版本\n" +
+        "   - 关键代码架构决策\n" +
+        "   - 已解决的问题和遗留问题\n\n" +
+        "### 5. 重要事实与引用\n" +
+        "   - 讨论中提到的名字、数字、时间、链接、参考信息\n\n" +
+        "### 6. 用户情感与反馈\n" +
+        "   - 用户对哪些回复满意/不满意\n" +
+        "   - 用户表达的情感状态（兴奋、沮丧等）\n\n" +
+        "## Quality rules:\n" +
+        "- Minimum 400 characters, maximum 1200 characters\n" +
+        "- Be specific with names, numbers, and code details — don't generalize\n" +
+        "- Preserve exact terminology and jargon the user used\n" +
+        "- If a section has nothing to record, omit it rather than writing \"nothing\"\n" +
+        "- Output ONLY the summary text, no meta-commentary",
     },
     ...oldMessages.map((m) => ({ role: m.role, content: m.content })),
   ];

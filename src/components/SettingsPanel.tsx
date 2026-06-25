@@ -11,6 +11,7 @@ import AuroraBackground from "./AuroraBackground";
 import type { ModelParams } from "../types";
 import { SUPPORTED_LOCALES, PREFERRED_LOCALES, PreferredLanguage } from "../i18n";
 
+
 interface Props { onBack: () => void; yolo?: boolean; }
 
 // ── 可复制文本的弹窗组件 ──
@@ -111,6 +112,44 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
   const [cm, scm] = useState(false); const [cop, scop] = useState(""); const [cnp, scnp] = useState(""); const [ccp, sccp] = useState("");
   const [cdp, scdp] = useState<string | null>(null);
   useEffect(() => { getConfigDir().then(scdp); }, []);
+
+  // ── UnicodaPlus ──
+  const [plusEnabled, setPlusEnabled] = useState(false);
+  const [plusStatus, setPlusStatus] = useState<{ running: boolean; port: number | null; clients: { app_name: string; app_version: string; capabilities_count: number; connected_at: number; remote_addr: string }[]; enabled: boolean } | null>(null);
+  const [plusMsg, setPlusMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const plusStatusRef = useRef(plusStatus);
+  plusStatusRef.current = plusStatus;
+
+  const loadPlusStatus = useCallback(async () => {
+    try {
+      const status = await invoke<typeof plusStatus>("plus_get_status");
+      if (status) {
+        setPlusStatus(status);
+        setPlusEnabled(status.enabled);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const togglePlus = useCallback(async () => {
+    const newEnabled = !plusEnabled;
+    try {
+      const status = await invoke<typeof plusStatus>("plus_set_enabled", { enabled: newEnabled });
+      if (!status) return;
+      setPlusStatus(status);
+      setPlusEnabled(newEnabled);
+      setPlusMsg({ type: "ok", text: newEnabled ? `✅ Plus 服务已启动 (端口 ${status.port})` : "✅ Plus 服务已停止" });
+    } catch (e) {
+      setPlusMsg({ type: "err", text: String(e) });
+    }
+  }, [plusEnabled]);
+
+  // 首次加载和轮询状态
+  useEffect(() => { loadPlusStatus(); }, [loadPlusStatus]);
+  useEffect(() => {
+    if (!plusEnabled) return;
+    const interval = setInterval(() => { loadPlusStatus(); }, 3000);
+    return () => clearInterval(interval);
+  }, [plusEnabled, loadPlusStatus]);
 
   // ── Cookie 管理 ──
   const [cookieInfo, setCookieInfo] = useState<{ count: number; domains: string[]; updated_at: string } | null>(null);
@@ -335,14 +374,13 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
           </div>
           <div style={{ marginBottom: "28px" }}>
             <div style={fl}>{t("theme")}</div>
-            <div style={{ position: "relative", opacity: y ? 0.35 : 1, pointerEvents: y ? "none" : "auto", transition: "opacity 0.2s" }}>
+            <div style={{ position: "relative" }}>
               <select value={theme} onChange={(e) => setTheme(e.target.value as "dark" | "light")} style={ss}>
                 <option value="dark">{t("themeDark")}</option>
                 <option value="light">{t("themeLight")}</option>
               </select>
               {sc}
             </div>
-            {y && <div style={{ fontSize: "11px", color: C.t4, marginTop: "6px", lineHeight: 1.6, fontStyle: "italic" }}>{t("themeDisabledInYolo")}</div>}
           </div>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", lineHeight: 1.6 }}>
@@ -617,6 +655,30 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
+        {/* ── 清理缓存 ── */}
+        <SE yolo={y} title={t("cacheClear")} desc={t("cacheClearDesc")}>
+          <button onClick={() => {
+            if (!confirm(t("cacheClearConfirm"))) return;
+            // 清除 localStorage 中的会话缓存
+            const cacheKeys = ["unicoda-conversations-meta", "unicoda-yolo-conversations-meta"];
+            for (const key of cacheKeys) localStorage.removeItem(key);
+            // 清除文件回退缓存
+            const extraKeys: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (k && k.startsWith("normal/")) extraKeys.push(k);
+            }
+            for (const k of extraKeys) localStorage.removeItem(k);
+            setModalMsg("✅ " + t("cacheCleared"));
+          }}
+            style={{ width: "100%", padding: "12px 0", borderRadius: "8px", border: `1px solid ${C.border}`, background: "transparent", color: C.t2, fontSize: "14px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", lineHeight: 1.6, transition: "all 0.15s" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.t3; e.currentTarget.style.background = "var(--c-bg3)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}>
+            {t("cacheClearBtn")}
+          </button>
+        </SE>
+        <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
+
         <SE yolo={y} title={t("internetSearchTitle")} desc={t("internetSearchDesc")}>
           {/* ── 联网搜索主开关 ── */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
@@ -742,6 +804,47 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
               </div>
             </div>
           </AnimatedSection>
+        </SE>
+        <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
+
+        {/* ── UnicodaPlus ── */}
+        <SE yolo={y} title={t("plusService")} desc={t("plusServiceDesc")}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
+            <span style={fl}>{t("plusEnable")}</span>
+            <SW on={plusEnabled} oc={togglePlus} />
+          </div>
+
+          {plusMsg && (
+            <div onClick={() => setPlusMsg(null)}
+              style={{ padding: "10px 12px", borderRadius: "6px", fontSize: "12px", marginBottom: "20px", lineHeight: 1.6, color: plusMsg.type === "ok" ? "#22c55e" : "#ef4444", background: plusMsg.type === "ok" ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)", cursor: "pointer" }}>
+              {plusMsg.text}
+            </div>
+          )}
+
+          {plusStatus && (
+            <div style={{ fontSize: "13px", color: C.t2, lineHeight: 1.8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: plusStatus.running ? "#22c55e" : "#ef4444", flexShrink: 0 }} />
+                <span>{plusStatus.running ? t("plusStatusRunning") : t("plusStatusStopped")}</span>
+                {plusStatus.port && <span style={{ color: C.t3 }}>({t("plusPort")}: {plusStatus.port})</span>}
+              </div>
+              {plusStatus.running && (
+                <div style={{ background: C.bg, borderRadius: "8px", padding: "12px", border: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: "12px", fontWeight: 600, color: C.t2, marginBottom: "8px" }}>{t("plusConnectedClients")}</div>
+                  {plusStatus.clients.length === 0 ? (
+                    <div style={{ fontSize: "12px", color: C.t3, fontStyle: "italic" }}>{t("plusNoClients")}</div>
+                  ) : (
+                    plusStatus.clients.map((c, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < plusStatus.clients.length - 1 ? `1px solid ${C.border}` : "none", fontSize: "12px" }}>
+                        <span style={{ color: C.t2 }}>{c.app_name} <span style={{ color: C.t3 }}>v{c.app_version}</span></span>
+                        <span style={{ color: C.t3 }}>{c.capabilities_count} {t("plusClientCapabilities")}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </SE>
         <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
 
@@ -887,8 +990,6 @@ export default function SettingsPanel({ onBack, yolo }: Props) {
             </div>
           </AnimatedSection>
         </SE>
-        <hr style={{ height: "1px", backgroundColor: C.border, border: "none", margin: "0" }} />
-
         <SE yolo={y} title={t("disclaimerTitle")}>
           <div style={{ fontSize: "12px", color: C.t3, lineHeight: 1.8, display: "flex", flexDirection: "column", gap: "12px" }}>
             <div>• {t("disclaimerFee")}</div>

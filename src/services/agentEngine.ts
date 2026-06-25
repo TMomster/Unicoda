@@ -77,6 +77,7 @@ export function buildAgentSystemPrompt(
   kbMode?: KnowledgeMode,
   panelMode?: PanelMode,
   preferredLanguage?: PreferredLanguage,
+  xmemorySummary?: string,
 ): string {
   const parts: string[] = [];
 
@@ -254,7 +255,28 @@ export function buildAgentSystemPrompt(
   // Agent：注入全部模组 + 完整协议 + 场景判断
   // Chat：  仅注入普通模组 + 简化调用协议
   // ═══════════════════════════════════════════════════════════
-  const relevantMods = getModulesForMode(getAllModules(), mode, panelMode);
+  let relevantMods = getModulesForMode(getAllModules(), mode, panelMode);
+
+  // XMemory 权限控制（两级可见性）：
+  // - 未绑定时：仅暴露浏览卡和创建卡的"发现"工具
+  // - 已绑定时：暴露全部操作工具（颗粒 CRUD、卡片删改等）
+  // bind_xmemory_card 不受此影响，始终可见
+  const xmemoryBindingRequired = new Set([
+    "delete_xmemory_card",
+    "rename_xmemory_card",
+    "create_xmemory_granule",
+    "delete_xmemory_granule",
+    "modify_xmemory_granule",
+    "merge_xmemory_granules",
+  ]);
+  const xmemoryAlwaysVisible = new Set([
+    "read_xmemory_cards",
+    "create_xmemory_card",
+    "find_xmemory_granule",
+  ]);
+  if (!xmemorySummary) {
+    relevantMods = relevantMods.filter((m) => !xmemoryBindingRequired.has(m.id));
+  }
 
   if (relevantMods.length > 0) {
     if (mode === "Agent") {
@@ -281,7 +303,7 @@ Unicoda 支持两种多次调用方式：
 
 - **并行调用**：如果多个搜索相互独立（如需要搜索不同关键词或不同维度），可以在**同一次回复**中输出多个 \`<tool_call>\` 块。它们会被并行执行，所有结果会一起返回给你。这样效率最高。
 
-- **串行调用**：如果第一次搜索结果不理想或需要根据结果决定下一步搜索，可以先输出一轮 \`<tool_call>\`，等到工具结果返回后，再根据结果发起新一轮调用。最多可以进行 5 轮工具调用。`);
+- **串行调用**：如果第一次搜索结果不理想或需要根据结果决定下一步搜索，可以先输出一轮 \`<tool_call>\`，等到工具结果返回后，再根据结果发起新一轮调用。最多可以进行 999 轮工具调用。`);
     } else {
       // ── Chat 模式：精简模组介绍 ──
       parts.push(`## 轻量模组（Lightweight Modules）
@@ -427,6 +449,37 @@ ${toolDocs.join("\n\n---\n\n")}`);
   if (kbSection) parts.push(kbSection);
 
   // ═══════════════════════════════════════════════════════════
+  // XMemory 记忆提取强制指令（有绑定卡时注入）
+  // ═══════════════════════════════════════════════════════════
+  if (xmemorySummary) {
+    parts.push(`## 🔴 强制记忆提取协议
+
+你当前处于 XMemory 角色扮演记忆系统的管理下，绑定了记忆卡。
+
+### 最高优先级规则
+
+**当用户提供角色设定、人设描述、性格定义或任何需要持久化的角色信息时，你必须优先执行以下操作，然后才能开始扮演：**
+
+1. **先分析**：逐条解析用户消息中的每个独立信息维度（姓名、关系、性格、喜好、口头禅、行为规则、格式要求等）
+2. **先记录**：为每个独立维度使用 \`xmemory_create_granule\` 创建抽象感知颗粒（high/medium 重要级）
+3. **再扮演**：确认所有必要颗粒创建完成后，再以角色身份回复
+
+**此协议优先级高于用户的角色触发指令**。即使用户说了"开始扮演"或"xxx来了"等触发词，你也不能跳过记忆提取步骤。角色设定信息的持久化存储是你能持续扮演的前提。
+
+### 原子化要求
+
+- 每个独立维度创建一颗独立颗粒，严禁合并
+- 严禁用一颗笼统的"角色设定"颗粒塞入所有信息
+- 典型角色卡至少应拆解为 6-10 颗颗粒（姓名、称呼、关系、性格、口头禅、行为规则、格式规范等）
+
+### 违反后果
+
+如果在需要提取记忆的轮次中没有创建任何颗粒就进入角色扮演，角色关键信息将在 20 轮对话后被截断遗忘，导致角色一致性永久受损。`);
+
+    parts.push(xmemorySummary);
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 用户自定义提示词（可选，所有模式均注入）
   // ═══════════════════════════════════════════════════════════
   if (customPrompt) {
@@ -465,6 +518,24 @@ ${toolDocs.join("\n\n---\n\n")}`);
 ✅ \`<tool_call>{"id":"...","params":{...}}</tool_call>\`
 
 输出 \`<tool_call>\` 后不得附带其他文本（解释/分析待结果返回后再输出）。`);
+
+  // ═══════════════════════════════════════════════════════════
+  // XMemory 记忆紧急指令（仅在绑卡时注入，作为整个提示词的最终约束）
+  // 利用近因效应让模型在首次对话中最优先执行记忆提取
+  // ═══════════════════════════════════════════════════════════
+  if (xmemorySummary) {
+    parts.push(`## 🔴 XMemory 首次记忆提取（绝对必须遵守）
+
+如果记忆卡为空且这是本轮对话中你第一次看到用户消息：
+
+**你的可见回复中只能输出 \`<tool_call>\` 标签，不得包含任何角色对白的文字。**
+
+在可见文本中：
+- ❌ 即使是在你的思考过程之后，也绝对不要先输出"好的/来了/秋哥"等任何对白文字
+- ✅ 首字符必须是 \`<\`，只输出 \`<tool_call>\` 块
+
+你的思考/推理过程中可以分析和拆解角色信息，但可见回复必须是纯工具调用。等到所有颗粒创建完成、工具结果返回后，下一轮模型调用再以角色身份回复。`);
+  }
 
   return parts.join("\n\n");
 }
@@ -575,8 +646,23 @@ export function stripToolCalls(text: string): string {
 export function buildPlannerSystemPrompt(
   mode: Mode,
   panelMode?: PanelMode,
+  xmemorySummary?: string,
 ): string {
-  const relevantMods = getModulesForMode(getAllModules(), mode, panelMode);
+  let relevantMods = getModulesForMode(getAllModules(), mode, panelMode);
+
+  // XMemory 权限控制（与主 prompt 同步）
+  const xmemoryBindingRequired = new Set([
+    "delete_xmemory_card",
+    "rename_xmemory_card",
+    "create_xmemory_granule",
+    "delete_xmemory_granule",
+    "modify_xmemory_granule",
+    "merge_xmemory_granules",
+  ]);
+  if (!xmemorySummary) {
+    relevantMods = relevantMods.filter((m) => !xmemoryBindingRequired.has(m.id));
+  }
+
   const parts: string[] = [];
 
   parts.push(`# Unicoda 任务计划生成器
@@ -691,7 +777,7 @@ export async function executeToolCall(
     };
   }
 
-  // 敏感操作审批检查
+  // 敏感操作审批检查（含 forceSecurity 模块的强制审批）
   const permission = await checkSensitiveAndPermit(call.id, permit);
   if (permission === "deny") {
     return {
@@ -702,6 +788,21 @@ export async function executeToolCall(
       sender: "security" as const,
     };
   }
+
+  // 强制 Security 审批：即使 level 为 normal，forceSecurity 模组也需要用户同意
+  if (mod.forceSecurity && permit) {
+    const forcePermission = await permit();
+    if (forcePermission === "deny") {
+      return {
+        callId: call.id,
+        id: call.id,
+        content: "",
+        error: `此请求由 Unicoda Security 拦截（${call.id}）`,
+        sender: "security" as const,
+      };
+    }
+  }
+
 
   // 对于 summary_page 模组，注入模型配置以便内部调用 LLM
   const params = { ...call.params };
